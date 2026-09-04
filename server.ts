@@ -437,6 +437,189 @@ function localAnalysisFallback(
 
 
 /* =========================================================
+   GROQ PRIMARY AI + GEMINI BACKUP
+   Groq OpenAI-compatible REST API.
+========================================================= */
+
+// Production model currently listed by Groq.
+const GROQ_MODELS = [
+  'openai/gpt-oss-120b',
+  'openai/gpt-oss-20b',
+  'llama-3.3-70b-versatile',
+];
+
+function getGroqKey() {
+  return process.env.GROQ_API_KEY?.trim() || '';
+}
+
+function isRetryableRemoteError(status: number, message: string) {
+  const text = String(message || '').toLowerCase();
+  return (
+    status === 408 ||
+    status === 409 ||
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    text.includes('rate limit') ||
+    text.includes('temporarily') ||
+    text.includes('overloaded') ||
+    text.includes('timeout') ||
+    text.includes('capacity')
+  );
+}
+
+async function callGroq(request: {
+  systemInstruction?: string;
+  prompt: string;
+  images?: Array<{ mimeType: string; base64: string }>;
+  jsonMode?: boolean;
+}) {
+  const apiKey = getGroqKey();
+  if (!apiKey) {
+    throw new Error('GROQ_API_KEY is not configured.');
+  }
+
+  // The current primary Groq production models are text models.
+  // PDF/image files are already extracted by the backend where possible.
+  const lastErrors: string[] = [];
+
+  for (const model of GROQ_MODELS) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        console.log(`[Groq] Trying ${model} (attempt ${attempt}/2)`);
+
+        const body: any = {
+          model,
+          messages: [
+            ...(request.systemInstruction
+              ? [{ role: 'system', content: request.systemInstruction }]
+              : []),
+            { role: 'user', content: request.prompt },
+          ],
+          stream: false,
+          temperature: request.jsonMode ? 0.1 : 0.2,
+        };
+
+        if (request.jsonMode) {
+          body.response_format = { type: 'json_object' };
+        }
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 120000);
+
+        let response: Response;
+        try {
+          response = await fetch(
+            'https://api.groq.com/openai/v1/chat/completions',
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(body),
+              signal: controller.signal,
+            },
+          );
+        } finally {
+          clearTimeout(timeout);
+        }
+
+        const raw = await response.text();
+        let data: any = null;
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          data = null;
+        }
+
+        if (!response.ok) {
+          const message =
+            data?.error?.message ||
+            raw ||
+            `HTTP ${response.status}`;
+          const error: any = new Error(message);
+          error.status = response.status;
+          throw error;
+        }
+
+        const text = data?.choices?.[0]?.message?.content || '';
+        if (!text) {
+          throw new Error('Groq returned an empty response.');
+        }
+
+        console.log(`[Groq] Success with ${model}`);
+        return text;
+      } catch (error: any) {
+        const status = Number(error?.status || error?.code || 0);
+        const message = String(error?.message || error);
+        lastErrors.push(`${model}: ${message}`);
+
+        console.error(
+          `[Groq] ${model} attempt ${attempt} failed:`,
+          message,
+        );
+
+        if (attempt < 2 && isRetryableRemoteError(status, message)) {
+          await sleep(1000);
+          continue;
+        }
+
+        break;
+      }
+    }
+  }
+
+  throw new Error(
+    `All Groq models failed. ${lastErrors.slice(-3).join(' | ')}`,
+  );
+}
+
+async function generateAIResponse(request: {
+  prompt: string;
+  systemInstruction?: string;
+  images?: Array<{ mimeType: string; base64: string }>;
+  jsonMode?: boolean;
+}) {
+  // PRIMARY: GROQ
+  if (getGroqKey()) {
+    try {
+      const text = await callGroq(request);
+      return { text, provider: 'GROQ' };
+    } catch (error: any) {
+      console.warn(
+        '[AI] Groq failed; trying Gemini backup.',
+        error?.message || error,
+      );
+    }
+  } else {
+    console.warn(
+      '[AI] GROQ_API_KEY is not configured; trying Gemini backup.',
+    );
+  }
+
+  // BACKUP: GEMINI
+  const gemini = getGeminiClient();
+  if (gemini) {
+    try {
+      const response = await generateGeminiWithFallback(gemini, {
+        contents: request.prompt,
+        systemInstruction: request.systemInstruction,
+        temperature: request.jsonMode ? 0.1 : 0.2,
+      });
+      return { text: response.text || '', provider: 'GEMINI' };
+    } catch (error: any) {
+      console.warn('[AI] Gemini backup failed.', error?.message || error);
+    }
+  }
+
+  // LAST RESORT: deterministic local extraction.
+  throw new Error('All external AI providers are unavailable.');
+}
+
+/* =========================================================
    CASE ANALYSIS ENGINE
 ========================================================= */
 
@@ -450,13 +633,6 @@ async function analyzeCaseFiles(
   },
   extractedFiles: any[],
 ) {
-  const ai = getGeminiClient();
-
-  if (!ai) {
-    console.warn('[Gemini] Not configured. Using LOCAL FALLBACK ENGINE.');
-    return localAnalysisFallback(caseInfo, extractedFiles);
-  }
-
   const textFiles = extractedFiles.filter(
     (file) =>
       file.type === 'text' ||
@@ -777,20 +953,24 @@ Return JSON only.
     ...imageParts,
   ];
 
-  let response: any;
+  let aiResponse: any;
   try {
-    response = await generateGeminiWithFallback(ai, {
-      contents,
+    aiResponse = await generateAIResponse({
+      prompt,
       systemInstruction,
-      temperature: 0.1,
+      images: imageFiles.map((file) => ({
+        mimeType: file.mimeType,
+        base64: file.base64,
+      })),
+      jsonMode: true,
     });
   } catch (error: any) {
-    console.warn('[Gemini] All remote models failed. Using LOCAL FALLBACK ENGINE.');
-    console.warn('[Gemini] Final error:', error?.message || error);
+    console.warn('[AI] All external AI providers failed. Using LOCAL FALLBACK ENGINE.');
+    console.warn('[AI] Final error:', error?.message || error);
     return localAnalysisFallback(caseInfo, extractedFiles);
   }
 
-  const rawText = response.text || '';
+  const rawText = aiResponse.text || '';
 
   const parsed = safeJsonParse(rawText);
 
@@ -801,7 +981,7 @@ Return JSON only.
     );
 
     throw new Error(
-      'Gemini returned an invalid analysis response.',
+      `${aiResponse.provider} returned an invalid analysis response.`,
     );
   }
 
@@ -856,8 +1036,8 @@ async function startServer() {
     res.json({
       status: 'online',
       system: 'Criminal Network Investigation Backend',
-      geminiConfigured:
-        !!process.env.GEMINI_API_KEY,
+      geminiConfigured: !!process.env.GEMINI_API_KEY,
+      groqConfigured: !!process.env.GROQ_API_KEY,
       timestamp: new Date().toISOString(),
     });
   });
@@ -1104,17 +1284,6 @@ async function startServer() {
           caseData,
         } = req.body;
 
-        const ai =
-          getGeminiClient();
-
-        if (!ai) {
-          const local = localAnalysisFallback(
-            { title: String(caseData?.case?.title || caseId || 'Investigation'), summary: String(caseData?.case?.summary || ''), priority: String(caseData?.case?.priority || 'MEDIUM'), status: String(caseData?.case?.status || 'IN PROGRESS'), leadInvestigator: '' },
-            [],
-          );
-          return res.json({ success: true, scanId: `SCAN-LOCAL-${Date.now().toString(36).toUpperCase()}`, caseId, scan: { scanId: `SCAN-LOCAL-${Date.now().toString(36).toUpperCase()}`, caseId, summary: local.intelligence.overview, networkBridges: [], relationshipPatterns: [], timelinePatterns: [], evidenceCorrelations: [], anomalies: [], riskIndicators: local.intelligence.riskIndicators, investigativeGaps: local.intelligence.unknowns, priorityFindings: local.intelligence.keyFindings, verificationSteps: local.intelligence.verificationSteps, confidence: local.case.confidence }, scannedAt: new Date().toISOString() });
-        }
-
         if (!caseData) {
           return res.status(400).json({
             error:
@@ -1200,14 +1369,11 @@ Return VALID JSON ONLY using:
 }
 `;
 
-        let response: any;
+        let aiResponse: any;
         try {
-          response =
-            await generateGeminiWithFallback(ai, {
-              contents:
-                deepScanPrompt,
-
-              systemInstruction: `
+          aiResponse = await generateAIResponse({
+            prompt: deepScanPrompt,
+            systemInstruction: `
 You are a synthetic criminal-network investigation
 analysis engine.
 
@@ -1223,17 +1389,17 @@ Distinguish facts from analytical inference.
 AI findings require human verification.
 
 Return JSON only.
-              `,
-              temperature: 0.1,
-            });
+            `,
+            jsonMode: true,
+          });
         } catch (error: any) {
           const scanId = `SCAN-LOCAL-${Date.now().toString(36).toUpperCase()}`;
-          console.warn('[Gemini] Deep scan unavailable. Returning local scan.');
+          console.warn('[AI] Deep scan unavailable. Returning local scan.');
           return res.json({ success: true, scanId, caseId, scan: { scanId, caseId, summary: 'Deterministic local deep scan completed because the external AI service was unavailable.', networkBridges: [], relationshipPatterns: [], timelinePatterns: [], evidenceCorrelations: [], anomalies: [], riskIndicators: [], investigativeGaps: ['External AI analysis unavailable; verify findings manually.'], priorityFindings: [], verificationSteps: ['Review the stored evidence and verify key relationships.'], confidence: 0.5 }, scannedAt: new Date().toISOString() });
         }
 
         const rawText =
-          response.text || '';
+          aiResponse.text || '';
 
         const scan =
           safeJsonParse(rawText);
@@ -1308,23 +1474,6 @@ Return JSON only.
           context,
         } = req.body;
 
-        const ai =
-          getGeminiClient();
-
-        if (!ai) {
-          return res.json({
-            reply:
-              'Gemini is not configured. Please check GEMINI_API_KEY in the backend environment.',
-
-            citations: [],
-
-            confidence: 0,
-
-            source:
-              'BACKEND',
-          });
-        }
-
         const systemPrompt = `
 You are an investigative intelligence copilot.
 
@@ -1372,11 +1521,10 @@ Unknowns / Limitations
 Recommended Verification Steps
 `;
 
-        let response: any;
+        let aiResponse: any;
         try {
-          response =
-            await generateGeminiWithFallback(ai, {
-              contents: `
+          aiResponse = await generateAIResponse({
+            prompt: `
 ANALYST QUERY:
 
 ${message}
@@ -1393,26 +1541,18 @@ SELECTED ALERT:
 
 ${alertId || 'NONE'}
             `,
-
-              systemInstruction:
-                systemPrompt,
-              temperature: 0.2,
-            });
+            systemInstruction: systemPrompt,
+            jsonMode: false,
+          });
         } catch (error: any) {
           return res.json({ reply: 'The external AI service is temporarily unavailable. The supplied investigation context remains available for manual review. Verify evidence and relationships before drawing conclusions.', citations: [], confidence: 0.5, source: 'LOCAL_FALLBACK' });
         }
 
         res.json({
-          reply:
-            response.text ||
-            'No analytical response was generated.',
-
+          reply: aiResponse.text || 'No analytical response was generated.',
           citations: [],
-
           confidence: 0.8,
-
-          source:
-            'GEMINI_INTELLIGENCE_ENGINE',
+          source: `${aiResponse.provider}_INTELLIGENCE_ENGINE`,
         });
       } catch (err: any) {
         console.error(
@@ -1491,6 +1631,7 @@ ${alertId || 'NONE'}
       );
     },
   );
+  
 }
 
 startServer();
