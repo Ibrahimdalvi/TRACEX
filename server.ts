@@ -321,126 +321,6 @@ async function generateGeminiWithFallback(
 
 
 /* =========================================================
-   DETERMINISTIC TIMELINE EXTRACTION
-   Guarantees that explicit date/time references in supplied
-   source material are preserved even if the LLM omits them.
-========================================================= */
-
-function extractExplicitTimeline(extractedFiles: any[]) {
-  const results: any[] = [];
-  const seen = new Set<string>();
-
-  const add = (date: string, time: string, fileName: string, context: string) => {
-    const cleanDate = String(date || '').trim();
-    const cleanTime = String(time || '').trim();
-    const key = `${cleanDate}|${cleanTime}|${fileName}`;
-    if (!cleanDate || seen.has(key)) return;
-    seen.add(key);
-
-    const compactContext = context
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 240);
-
-    results.push({
-      id: `EXPLICIT-EVENT-${results.length + 1}`,
-      date: cleanDate,
-      time: cleanTime,
-      title: 'SOURCE DATE REFERENCE',
-      description: compactContext
-        ? `Explicit date/time reference found in ${fileName}: ${compactContext}`
-        : `Explicit date/time reference found in ${fileName}.`,
-      entityId: '',
-      evidenceReference: fileName,
-      sourceReference: fileName,
-      confidence: 0.95,
-    });
-  };
-
-  const monthNames =
-    'January|February|March|April|May|June|July|August|September|October|November|December';
-
-  for (const file of extractedFiles) {
-    const text = file.type === 'spreadsheet'
-      ? JSON.stringify(file.content)
-      : String(file.content || '');
-
-    if (!text.trim()) continue;
-
-    // ISO dates: 2026-08-15 / 2026/08/15
-    for (const m of text.matchAll(/\b(20\d{2}[-/]\d{1,2}[-/]\d{1,2})(?:[T\s]+(\d{1,2}:\d{2}(?::\d{2})?(?:\s?[AP]M)?))?/gi)) {
-      const context = text.slice(Math.max(0, (m.index ?? 0) - 70), (m.index ?? 0) + m[0].length + 130);
-      add(m[1], m[2] || '', file.filename, context);
-    }
-
-    // DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY
-    for (const m of text.matchAll(/\b(\d{1,2}[\/.-]\d{1,2}[\/.-]20\d{2})(?:[,\s]+(\d{1,2}:\d{2}(?:\s?[AP]M)?))?/gi)) {
-      const context = text.slice(Math.max(0, (m.index ?? 0) - 70), (m.index ?? 0) + m[0].length + 130);
-      add(m[1], m[2] || '', file.filename, context);
-    }
-
-    // Month-name dates: 15 August 2026 / August 15, 2026
-    for (const m of text.matchAll(new RegExp(
-      String.raw`\b(\d{1,2}\s+(?:${monthNames})\s+20\d{2}|(?:${monthNames})\s+\d{1,2},?\s+20\d{2})(?:[,\s]+(\d{1,2}:\d{2}(?:\s?[AP]M)?))?\b`,
-      'gi'
-    ))) {
-      const context = text.slice(Math.max(0, (m.index ?? 0) - 70), (m.index ?? 0) + m[0].length + 130);
-      add(m[1], m[2] || '', file.filename, context);
-    }
-  }
-
-  return results;
-}
-
-function mergeTimelineEvidence(analysis: any, extractedFiles: any[]) {
-  const explicit = extractExplicitTimeline(extractedFiles);
-  const aiTimeline = Array.isArray(analysis?.timeline) ? analysis.timeline : [];
-
-  // Preserve the AI timeline first, then add only explicit source dates
-  // that the AI did not already represent.
-  const merged = [...aiTimeline];
-
-  for (const item of explicit) {
-    const duplicate = merged.some((existing: any) => {
-      const a = String(existing?.date || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      const b = String(item.date || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      return a && b && (a === b || a.includes(b) || b.includes(a));
-    });
-
-    if (!duplicate) merged.push(item);
-  }
-
-  merged.sort((a: any, b: any) =>
-    String(a?.date || '').localeCompare(String(b?.date || ''))
-  );
-
-  // Keep events synchronized with timeline so the dashboard counts
-  // do not disagree.
-  const aiEvents = Array.isArray(analysis?.events) ? analysis.events : [];
-  const events = [...aiEvents];
-
-  for (const item of merged) {
-    const exists = events.some((event: any) =>
-      String(event?.date || '') === String(item?.date || '') &&
-      String(event?.evidenceReference || '') === String(item?.evidenceReference || '')
-    );
-
-    if (!exists) {
-      events.push({
-        ...item,
-        eventType: item.title || 'SOURCE DATE REFERENCE',
-      });
-    }
-  }
-
-  return {
-    ...analysis,
-    timeline: merged,
-    events,
-  };
-}
-
-/* =========================================================
    LOCAL FALLBACK ENGINE
    Runs without any external AI service. It only extracts
    identifiers and source references explicitly present in
@@ -500,11 +380,21 @@ function localAnalysisFallback(
     verificationStatus: 'UNVERIFIED',
   }));
 
-  const timeline = extractExplicitTimeline(extractedFiles).map((item: any) => ({
-    ...item,
-    entityId: entities[0]?.id || '',
-    title: 'DATE REFERENCE',
-  }));
+  const timeline: any[] = [];
+  for (const file of extractedFiles) {
+    const text = file.type === 'spreadsheet' ? JSON.stringify(file.content) : String(file.content || '');
+    for (const m of text.matchAll(/\b(20\d{2}[-/]\d{1,2}[-/]\d{1,2})\b/g)) {
+      timeline.push({
+        id: `LOCAL-EVENT-${timeline.length + 1}`,
+        date: m[1],
+        time: '',
+        title: 'DATE REFERENCE',
+        description: `Date explicitly referenced in ${file.filename}.`,
+        entityId: entities[0]?.id || '',
+        evidenceReference: file.filename,
+      });
+    }
+  }
 
   const risk = caseInfo.priority === 'HIGH' ? 'HIGH RISK' : caseInfo.priority === 'MEDIUM' ? 'ELEVATED RISK' : 'LOW RISK';
   const confidence = entities.length || evidence.length ? 0.72 : 0.35;
@@ -687,45 +577,187 @@ async function callGroq(request: {
   );
 }
 
+/* =========================================================
+   CEREBRAS BACKUP AI
+   OpenAI-compatible Cerebras API.
+========================================================= */
+
+const CEREBRAS_MODELS = [
+  'gpt-oss-120b',
+];
+
+function getCerebrasKey() {
+  return process.env.CEREBRAS_API_KEY?.trim() || '';
+}
+
+async function callCerebras(request: {
+  systemInstruction?: string;
+  prompt: string;
+  jsonMode?: boolean;
+}) {
+  const apiKey = getCerebrasKey();
+  if (!apiKey) {
+    throw new Error('CEREBRAS_API_KEY is not configured.');
+  }
+
+  const lastErrors: string[] = [];
+
+  for (const model of CEREBRAS_MODELS) {
+    try {
+      console.log(`[Cerebras] Trying ${model}`);
+
+      const body: any = {
+        model,
+        messages: [
+          ...(request.systemInstruction
+            ? [{ role: 'system', content: request.systemInstruction }]
+            : []),
+          { role: 'user', content: request.prompt },
+        ],
+        stream: false,
+        temperature: request.jsonMode ? 0.1 : 0.2,
+      };
+
+      if (request.jsonMode) {
+        body.response_format = { type: 'json_object' };
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120000);
+
+      let response: Response;
+      try {
+        response = await fetch(
+          'https://api.cerebras.ai/v1/chat/completions',
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          },
+        );
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      const raw = await response.text();
+      let data: any = null;
+
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        data = null;
+      }
+
+      if (!response.ok) {
+        const message =
+          data?.error?.message ||
+          raw ||
+          `HTTP ${response.status}`;
+        const error: any = new Error(message);
+        error.status = response.status;
+        throw error;
+      }
+
+      const text = data?.choices?.[0]?.message?.content;
+
+      if (!text) {
+        throw new Error('Cerebras returned an empty response.');
+      }
+
+      console.log(`[Cerebras] Success with ${model}`);
+      return text;
+    } catch (error: any) {
+      const message = String(error?.message || error);
+      lastErrors.push(`${model}: ${message}`);
+      console.error(`[Cerebras] ${model} failed:`, message);
+    }
+  }
+
+  throw new Error(
+    `All Cerebras models failed. ${lastErrors.slice(-3).join(' | ')}`,
+  );
+}
+
+/* =========================================================
+   AI PROVIDER FALLBACK CHAIN
+   1. Gemini
+   2. Cerebras
+   3. Groq
+   4. Local deterministic fallback in analyzeCaseFiles()
+========================================================= */
+
 async function generateAIResponse(request: {
   prompt: string;
   systemInstruction?: string;
   images?: Array<{ mimeType: string; base64: string }>;
   jsonMode?: boolean;
 }) {
-  // PRIMARY: GROQ
-  if (getGroqKey()) {
-    try {
-      const text = await callGroq(request);
-      return { text, provider: 'GROQ' };
-    } catch (error: any) {
-      console.warn(
-        '[AI] Groq failed; trying Gemini backup.',
-        error?.message || error,
-      );
-    }
-  } else {
-    console.warn(
-      '[AI] GROQ_API_KEY is not configured; trying Gemini backup.',
-    );
-  }
-
-  // BACKUP: GEMINI
+  // PRIMARY: GEMINI
   const gemini = getGeminiClient();
   if (gemini) {
     try {
+      console.log('[AI] Trying Gemini primary...');
       const response = await generateGeminiWithFallback(gemini, {
         contents: request.prompt,
         systemInstruction: request.systemInstruction,
         temperature: request.jsonMode ? 0.1 : 0.2,
       });
+      console.log('[AI] Gemini succeeded.');
       return { text: response.text || '', provider: 'GEMINI' };
     } catch (error: any) {
-      console.warn('[AI] Gemini backup failed.', error?.message || error);
+      console.warn(
+        '[AI] Gemini failed; trying Cerebras backup.',
+        error?.message || error,
+      );
     }
+  } else {
+    console.warn(
+      '[AI] GEMINI_API_KEY is not configured; trying Cerebras backup.',
+    );
   }
 
-  // LAST RESORT: deterministic local extraction.
+  // BACKUP 1: CEREBRAS
+  if (getCerebrasKey()) {
+    try {
+      console.log('[AI] Trying Cerebras backup...');
+      const text = await callCerebras(request);
+      return { text, provider: 'CEREBRAS' };
+    } catch (error: any) {
+      console.warn(
+        '[AI] Cerebras failed; trying Groq backup.',
+        error?.message || error,
+      );
+    }
+  } else {
+    console.warn(
+      '[AI] CEREBRAS_API_KEY is not configured; trying Groq backup.',
+    );
+  }
+
+  // BACKUP 2: GROQ
+  if (getGroqKey()) {
+    try {
+      console.log('[AI] Trying Groq backup...');
+      const text = await callGroq(request);
+      return { text, provider: 'GROQ' };
+    } catch (error: any) {
+      console.warn(
+        '[AI] Groq failed; using local deterministic fallback.',
+        error?.message || error,
+      );
+    }
+  } else {
+    console.warn(
+      '[AI] GROQ_API_KEY is not configured; using local deterministic fallback.',
+    );
+  }
+
+  // LAST RESORT is handled by analyzeCaseFiles(), where the extracted
+  // source material is available to the deterministic local engine.
   throw new Error('All external AI providers are unavailable.');
 }
 
@@ -977,10 +1009,6 @@ Examples:
 
 3. TIMELINE
 Build a chronological sequence of supported events.
-IMPORTANT: Extract every explicit date and time that appears in the
-source material. Preserve the original date wording where practical.
-Do not leave timeline empty when explicit date/time references exist.
-Each timeline item must reference the source filename.
 
 4. EVIDENCE CORRELATION
 Determine whether different evidence sources support the same
@@ -1090,7 +1118,7 @@ Return JSON only.
 
   if (!parsed) {
     console.error(
-      'AI returned invalid JSON:',
+      'Gemini returned invalid JSON:',
       rawText,
     );
 
@@ -1099,17 +1127,7 @@ Return JSON only.
     );
   }
 
-  // Important for the demo: preserve explicit dates/times from the
-  // uploaded source even when the LLM returns an empty timeline.
-  const enrichedAnalysis = mergeTimelineEvidence(parsed, extractedFiles);
-
-  console.log(
-    `[Timeline] AI events: ${Array.isArray(parsed.events) ? parsed.events.length : 0}, ` +
-    `AI timeline: ${Array.isArray(parsed.timeline) ? parsed.timeline.length : 0}, ` +
-    `final timeline: ${enrichedAnalysis.timeline.length}`,
-  );
-
-  return enrichedAnalysis;
+  return parsed;
 }
 
 /* =========================================================
@@ -1162,6 +1180,7 @@ async function startServer() {
       system: 'Criminal Network Investigation Backend',
       geminiConfigured: !!process.env.GEMINI_API_KEY,
       groqConfigured: !!process.env.GROQ_API_KEY,
+      cerebrasConfigured: !!process.env.CEREBRAS_API_KEY,
       timestamp: new Date().toISOString(),
     });
   });
@@ -1249,7 +1268,7 @@ async function startServer() {
         }
 
         /* -----------------------------------------------
-           AI ANALYSIS
+           GEMINI ANALYSIS
         ----------------------------------------------- */
 
         const analysis =
@@ -1755,7 +1774,7 @@ ${alertId || 'NONE'}
       );
     },
   );
-
+  
 }
 
 startServer();
