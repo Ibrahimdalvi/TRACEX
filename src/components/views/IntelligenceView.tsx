@@ -73,12 +73,12 @@ const textValue = (value: any, fallback = ''): string => {
   if (typeof value === 'object') {
     return String(
       value.description ??
-        value.text ??
-        value.title ??
-        value.name ??
-        value.label ??
-        value.value ??
-        ''
+      value.text ??
+      value.title ??
+      value.name ??
+      value.label ??
+      value.value ??
+      ''
     ).trim() || fallback;
   }
 
@@ -178,10 +178,10 @@ const getSignalIcon = (title: string, icon?: string): string => {
 const getCaseId = (item: any): string => {
   return textValue(
     item?.caseId ??
-      item?.case_id ??
-      item?.caseID ??
-      item?.investigationId ??
-      item?.investigation_id,
+    item?.case_id ??
+    item?.caseID ??
+    item?.investigationId ??
+    item?.investigation_id,
     ''
   );
 };
@@ -218,21 +218,21 @@ const normalizeSignal = (
 
   const title = textValue(
     raw?.title ??
-      raw?.name ??
-      raw?.label ??
-      raw?.signal ??
-      raw?.type ??
-      raw?.category,
+    raw?.name ??
+    raw?.label ??
+    raw?.signal ??
+    raw?.type ??
+    raw?.category,
     `INTELLIGENCE SIGNAL ${index + 1}`
   );
 
   const description = textValue(
     raw?.description ??
-      raw?.summary ??
-      raw?.finding ??
-      raw?.details ??
-      raw?.text ??
-      raw?.reason,
+    raw?.summary ??
+    raw?.finding ??
+    raw?.details ??
+    raw?.text ??
+    raw?.reason,
     'An intelligence signal was generated from the supplied case data.'
   );
 
@@ -242,9 +242,9 @@ const normalizeSignal = (
 
   const confidence = clampPercent(
     raw?.confidence ??
-      raw?.confidenceScore ??
-      raw?.score ??
-      raw?.probability,
+    raw?.confidenceScore ??
+    raw?.score ??
+    raw?.probability,
     fallbackConfidence
   );
 
@@ -257,10 +257,10 @@ const normalizeSignal = (
     icon: getSignalIcon(title, textValue(raw?.icon, '')),
     sourceReference: textValue(
       raw?.sourceReference ??
-        raw?.source_reference ??
-        raw?.source ??
-        raw?.evidenceId ??
-        raw?.evidence_id,
+      raw?.source_reference ??
+      raw?.source ??
+      raw?.evidenceId ??
+      raw?.evidence_id,
       ''
     ),
     sourceType: textValue(raw?.sourceType ?? raw?.source_type, ''),
@@ -359,8 +359,8 @@ export const IntelligenceView: React.FC<IntelligenceViewProps> = ({
       .map((alert) =>
         clampPercent(
           alert?.confidence ??
-            alert?.confidenceScore ??
-            alert?.score,
+          alert?.confidenceScore ??
+          alert?.score,
           -1
         )
       )
@@ -369,7 +369,7 @@ export const IntelligenceView: React.FC<IntelligenceViewProps> = ({
     if (alertConfidences.length > 0) {
       return Math.round(
         alertConfidences.reduce((sum, n) => sum + n, 0) /
-          alertConfidences.length
+        alertConfidences.length
       );
     }
 
@@ -484,15 +484,15 @@ export const IntelligenceView: React.FC<IntelligenceViewProps> = ({
 
   const networkRisk = textValue(
     networkData.networkRisk ??
-      networkData.risk ??
-      networkData.assessment,
+    networkData.risk ??
+    networkData.assessment,
     ''
   );
 
   const overview = textValue(
     intelligenceData.overview ??
-      intelligenceData.summary ??
-      intelligenceData.assessment,
+    intelligenceData.summary ??
+    intelligenceData.assessment,
     ''
   );
 
@@ -715,9 +715,9 @@ export const IntelligenceView: React.FC<IntelligenceViewProps> = ({
               {networkRisk ||
                 (networkFindings.length
                   ? textValue(
-                      networkFindings[0],
-                      'Network findings detected from current case data.'
-                    )
+                    networkFindings[0],
+                    'Network findings detected from current case data.'
+                  )
                   : 'No network-risk assessment is available for this case.')}
             </p>
 
@@ -819,21 +819,19 @@ export const IntelligenceView: React.FC<IntelligenceViewProps> = ({
               return (
                 <div
                   key={signal.id}
-                  className={`bg-[#1a2120] border rounded-lg p-4 transition-colors hover:bg-[#202826] ${
-                    isHighRisk
+                  className={`bg-[#1a2120] border rounded-lg p-4 transition-colors hover:bg-[#202826] ${isHighRisk
                       ? 'border-[#ffb4ab]/25'
                       : 'border-[#3c4948]/40 hover:border-[#66FCF1]/30'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-3 min-w-0">
                       <div className="w-9 h-9 shrink-0 rounded-lg bg-[#090f0f] border border-[#3c4948]/50 flex items-center justify-center">
                         <span
-                          className={`material-symbols-outlined text-[18px] ${
-                            isHighRisk
+                          className={`material-symbols-outlined text-[18px] ${isHighRisk
                               ? 'text-[#ffb4ab]'
                               : 'text-[#66FCF1]'
-                          }`}
+                            }`}
                         >
                           {signal.icon}
                         </span>
@@ -845,14 +843,13 @@ export const IntelligenceView: React.FC<IntelligenceViewProps> = ({
                         </div>
 
                         <span
-                          className={`inline-block mt-1 px-1.5 py-0.5 rounded font-mono text-[7px] font-bold border ${
-                            signal.severity === 'CRITICAL' ||
-                            signal.severity === 'HIGH'
+                          className={`inline-block mt-1 px-1.5 py-0.5 rounded font-mono text-[7px] font-bold border ${signal.severity === 'CRITICAL' ||
+                              signal.severity === 'HIGH'
                               ? 'bg-[#93000a]/30 text-[#ffb4ab] border-[#ffb4ab]/20'
                               : signal.severity === 'MEDIUM'
-                              ? 'bg-[#F6B352]/10 text-[#F6B352] border-[#F6B352]/20'
-                              : 'bg-[#66FCF1]/10 text-[#66FCF1] border-[#66FCF1]/20'
-                          }`}
+                                ? 'bg-[#F6B352]/10 text-[#F6B352] border-[#F6B352]/20'
+                                : 'bg-[#66FCF1]/10 text-[#66FCF1] border-[#66FCF1]/20'
+                            }`}
                         >
                           {signal.severity}
                         </span>
@@ -912,97 +909,97 @@ export const IntelligenceView: React.FC<IntelligenceViewProps> = ({
           riskIndicators.length > 0 ||
           unknowns.length > 0 ||
           verificationSteps.length > 0) && (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 mt-5">
-            {keyFindings.length > 0 && (
-              <div className="bg-[#1a2120] border border-[#3c4948]/40 rounded-lg p-4">
-                <div className="font-mono text-[9px] font-bold text-[#7bd6d1] uppercase tracking-widest mb-3">
-                  KEY FINDINGS
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 mt-5">
+              {keyFindings.length > 0 && (
+                <div className="bg-[#1a2120] border border-[#3c4948]/40 rounded-lg p-4">
+                  <div className="font-mono text-[9px] font-bold text-[#7bd6d1] uppercase tracking-widest mb-3">
+                    KEY FINDINGS
+                  </div>
+
+                  <div className="space-y-2">
+                    {keyFindings.slice(0, 8).map(renderListItem)}
+                  </div>
                 </div>
+              )}
 
-                <div className="space-y-2">
-                  {keyFindings.slice(0, 8).map(renderListItem)}
+              {riskIndicators.length > 0 && (
+                <div className="bg-[#1a2120] border border-[#3c4948]/40 rounded-lg p-4">
+                  <div className="font-mono text-[9px] font-bold text-[#F6B352] uppercase tracking-widest mb-3">
+                    RISK INDICATORS
+                  </div>
+
+                  <div className="space-y-2">
+                    {riskIndicators.slice(0, 8).map((item, index) => {
+                      const value = textValue(item, '');
+                      if (!value) return null;
+
+                      return (
+                        <div
+                          key={`${value}-${index}`}
+                          className="flex items-start gap-2 text-[10px] text-[#bacac7] leading-relaxed"
+                        >
+                          <span className="text-[#F6B352] mt-0.5">•</span>
+                          <span>{value}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {riskIndicators.length > 0 && (
-              <div className="bg-[#1a2120] border border-[#3c4948]/40 rounded-lg p-4">
-                <div className="font-mono text-[9px] font-bold text-[#F6B352] uppercase tracking-widest mb-3">
-                  RISK INDICATORS
+              {unknowns.length > 0 && (
+                <div className="bg-[#1a2120] border border-[#3c4948]/40 rounded-lg p-4">
+                  <div className="font-mono text-[9px] font-bold text-[#859491] uppercase tracking-widest mb-3">
+                    UNKNOWNS / LIMITATIONS
+                  </div>
+
+                  <div className="space-y-2">
+                    {unknowns.slice(0, 8).map((item, index) => {
+                      const value = textValue(item, '');
+                      if (!value) return null;
+
+                      return (
+                        <div
+                          key={`${value}-${index}`}
+                          className="flex items-start gap-2 text-[10px] text-[#bacac7] leading-relaxed"
+                        >
+                          <span className="text-[#859491] mt-0.5">•</span>
+                          <span>{value}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
+              )}
 
-                <div className="space-y-2">
-                  {riskIndicators.slice(0, 8).map((item, index) => {
-                    const value = textValue(item, '');
-                    if (!value) return null;
+              {verificationSteps.length > 0 && (
+                <div className="bg-[#1a2120] border border-[#66FCF1]/15 rounded-lg p-4">
+                  <div className="font-mono text-[9px] font-bold text-[#66FCF1] uppercase tracking-widest mb-3">
+                    VERIFICATION STEPS
+                  </div>
 
-                    return (
-                      <div
-                        key={`${value}-${index}`}
-                        className="flex items-start gap-2 text-[10px] text-[#bacac7] leading-relaxed"
-                      >
-                        <span className="text-[#F6B352] mt-0.5">•</span>
-                        <span>{value}</span>
-                      </div>
-                    );
-                  })}
+                  <div className="space-y-2">
+                    {verificationSteps.slice(0, 8).map((item, index) => {
+                      const value = textValue(item, '');
+                      if (!value) return null;
+
+                      return (
+                        <div
+                          key={`${value}-${index}`}
+                          className="flex items-start gap-2 text-[10px] text-[#bacac7] leading-relaxed"
+                        >
+                          <span className="font-mono text-[#66FCF1] shrink-0">
+                            {String(index + 1).padStart(2, '0')}
+                          </span>
+                          <span>{value}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
-
-            {unknowns.length > 0 && (
-              <div className="bg-[#1a2120] border border-[#3c4948]/40 rounded-lg p-4">
-                <div className="font-mono text-[9px] font-bold text-[#859491] uppercase tracking-widest mb-3">
-                  UNKNOWNS / LIMITATIONS
-                </div>
-
-                <div className="space-y-2">
-                  {unknowns.slice(0, 8).map((item, index) => {
-                    const value = textValue(item, '');
-                    if (!value) return null;
-
-                    return (
-                      <div
-                        key={`${value}-${index}`}
-                        className="flex items-start gap-2 text-[10px] text-[#bacac7] leading-relaxed"
-                      >
-                        <span className="text-[#859491] mt-0.5">•</span>
-                        <span>{value}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {verificationSteps.length > 0 && (
-              <div className="bg-[#1a2120] border border-[#66FCF1]/15 rounded-lg p-4">
-                <div className="font-mono text-[9px] font-bold text-[#66FCF1] uppercase tracking-widest mb-3">
-                  VERIFICATION STEPS
-                </div>
-
-                <div className="space-y-2">
-                  {verificationSteps.slice(0, 8).map((item, index) => {
-                    const value = textValue(item, '');
-                    if (!value) return null;
-
-                    return (
-                      <div
-                        key={`${value}-${index}`}
-                        className="flex items-start gap-2 text-[10px] text-[#bacac7] leading-relaxed"
-                      >
-                        <span className="font-mono text-[#66FCF1] shrink-0">
-                          {String(index + 1).padStart(2, '0')}
-                        </span>
-                        <span>{value}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+              )}
+            </div>
+          )}
 
         {/* =======================================================
             AI DISCLAIMER

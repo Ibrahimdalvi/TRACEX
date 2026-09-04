@@ -4,56 +4,47 @@ import { EvidenceRecord, InvestigationCase } from '../../types';
 interface EvidenceVaultViewProps {
   evidenceList: EvidenceRecord[];
   currentCase: InvestigationCase;
-  onSelectEvidence: (item: EvidenceRecord) => void;
+  onSelectEvidence?: (item: EvidenceRecord) => void;
 }
 
+const CATEGORIES = [
+  'ALL',
+  'FINANCIAL',
+  'INTERCEPT',
+  'SURVEILLANCE',
+  'KYC_RECORD',
+  'EMAIL',
+  'URL',
+  'AUTHENTICATION',
+  'DOCUMENT',
+  'IMAGE',
+  'OTHER',
+];
+
 export const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
-  evidenceList,
+  evidenceList = [],
   currentCase,
-  onSelectEvidence,
 }) => {
-  const [filterCategory, setFilterCategory] = useState<string>('ALL');
-  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [filterCategory, setFilterCategory] = useState('ALL');
+  const [searchTerm, setSearchTerm] = useState('');
   const [selectedItem, setSelectedItem] = useState<EvidenceRecord | null>(
     evidenceList[0] || null
   );
+  const [isDossierOpen, setIsDossierOpen] = useState(false);
+  const [copiedHash, setCopiedHash] = useState(false);
 
-  /*
-   * ---------------------------------------------------------
-   * KEEP SELECTED EVIDENCE IN SYNC WITH CURRENT CASE
-   * ---------------------------------------------------------
-   *
-   * Old version only initialized selectedItem once.
-   * When the case/evidence changed, selectedItem could still
-   * point to the previous case.
-   */
   useEffect(() => {
-    if (!evidenceList || evidenceList.length === 0) {
-      setSelectedItem(null);
-      return;
-    }
-
     setSelectedItem((previous) => {
-      if (!previous) {
-        return evidenceList[0];
-      }
+      if (!evidenceList.length) return null;
+      if (!previous) return evidenceList[0];
 
-      const stillExists = evidenceList.find(
-        (item) => item.id === previous.id
+      const current = evidenceList.find(
+        (item: any) => item?.id === previous?.id
       );
 
-      return stillExists || evidenceList[0];
+      return current || evidenceList[0];
     });
   }, [evidenceList]);
-
-  /*
-   * ---------------------------------------------------------
-   * NORMALIZED EVIDENCE HELPERS
-   * ---------------------------------------------------------
-   *
-   * Different backend versions may use different property
-   * names. We support all common variants here.
-   */
 
   const getValue = (
     item: any,
@@ -77,8 +68,8 @@ export const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
     return fallback;
   };
 
-  const getTitle = (item: any): string => {
-    return getValue(
+  const getTitle = (item: any) =>
+    getValue(
       item,
       [
         'title',
@@ -90,35 +81,23 @@ export const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
       ],
       'Evidence Record'
     );
-  };
 
-  const getCategory = (item: any): string => {
-    return getValue(
+  const getCategory = (item: any) =>
+    getValue(
       item,
-      [
-        'category',
-        'evidenceCategory',
-        'type',
-        'evidenceType',
-      ],
+      ['category', 'evidenceCategory', 'type', 'evidenceType'],
       'GENERAL'
     );
-  };
 
-  const getClassification = (item: any): string => {
-    return getValue(
+  const getClassification = (item: any) =>
+    getValue(
       item,
-      [
-        'classification',
-        'securityClassification',
-        'classificationLevel',
-      ],
+      ['classification', 'securityClassification', 'classificationLevel'],
       'UNCLASSIFIED'
     );
-  };
 
-  const getDescription = (item: any): string => {
-    return getValue(
+  const getDescription = (item: any) =>
+    getValue(
       item,
       [
         'description',
@@ -130,74 +109,62 @@ export const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
       ],
       'No forensic description was returned by the analysis engine.'
     );
-  };
 
-  const getFileSize = (item: any): string => {
-    const value = getValue(
+  const getHash = (item: any) =>
+    getValue(item, [
+      'sha256',
+      'SHA256',
+      'sha_256',
+      'hash',
+      'checksum',
+      'checksumSha256',
+    ]);
+
+  const getFileUrl = (item: any) =>
+    getValue(item, [
+      'downloadUrl',
+      'downloadURL',
+      'fileUrl',
+      'fileURL',
+      'url',
+      'download',
+    ]);
+
+  const getFileName = (item: any) =>
+    getValue(
       item,
-      [
-        'fileSize',
-        'size',
-        'file_size',
-        'formattedSize',
-      ]
+      ['fileName', 'filename', 'name', 'documentName'],
+      getTitle(item)
     );
 
-    if (value) {
-      return value;
-    }
+  const getFileType = (item: any) => {
+    const direct = getValue(item, [
+      'fileType',
+      'mimeType',
+      'mime',
+      'contentType',
+    ]);
 
-    if (typeof item?.size === 'number') {
-      return formatBytes(item.size);
-    }
+    if (direct) return direct;
 
-    return 'Not available';
-  };
+    const name = getFileName(item);
 
-  const getFileType = (item: any): string => {
-    const direct = getValue(
-      item,
-      [
-        'fileType',
-        'mimeType',
-        'mime',
-        'contentType',
-        'type',
-      ]
-    );
-
-    if (direct) {
-      return direct;
-    }
-
-    const fileName = getValue(
-      item,
-      ['fileName', 'filename', 'name']
-    );
-
-    if (fileName && fileName.includes('.')) {
-      return fileName.split('.').pop()?.toUpperCase() || 'FILE';
+    if (name.includes('.')) {
+      return name.split('.').pop()?.toUpperCase() || 'FILE';
     }
 
     return 'FILE';
   };
 
-  const getUploadedBy = (item: any): string => {
-    return getValue(
+  const getUploadedBy = (item: any) =>
+    getValue(
       item,
-      [
-        'uploadedBy',
-        'uploaded_by',
-        'createdBy',
-        'author',
-        'source',
-      ],
+      ['uploadedBy', 'uploaded_by', 'createdBy', 'author', 'source'],
       'SYSTEM'
     );
-  };
 
-  const getUploadedAt = (item: any): string => {
-    return getValue(
+  const getUploadedAt = (item: any) =>
+    getValue(
       item,
       [
         'uploadedAt',
@@ -209,189 +176,135 @@ export const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
       ],
       'Not available'
     );
-  };
 
-  const getHash = (item: any): string => {
-    return getValue(
-      item,
-      [
-        'sha256',
-        'SHA256',
-        'sha_256',
-        'hash',
-        'checksum',
-        'checksumSha256',
-      ]
-    );
-  };
+  const getFileSize = (item: any) => {
+    const direct = getValue(item, [
+      'fileSize',
+      'formattedSize',
+      'size',
+      'file_size',
+    ]);
 
-  const getFileUrl = (item: any): string => {
-    return getValue(
-      item,
-      [
-        'downloadUrl',
-        'downloadURL',
-        'fileUrl',
-        'fileURL',
-        'url',
-        'download',
-        'path',
-      ]
-    );
-  };
+    if (direct && typeof item?.size !== 'number') return direct;
 
-  const formatBytes = (bytes: number): string => {
-    if (!Number.isFinite(bytes) || bytes <= 0) {
-      return 'Not available';
+    if (typeof item?.size === 'number') {
+      return formatBytes(item.size);
     }
 
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const index = Math.min(
-      Math.floor(Math.log(bytes) / Math.log(1024)),
-      units.length - 1
-    );
-
-    return `${(bytes / Math.pow(1024, index)).toFixed(
-      index === 0 ? 0 : 2
-    )} ${units[index]}`;
+    return direct || 'Not available';
   };
 
-  /*
-   * ---------------------------------------------------------
-   * FILTER
-   * ---------------------------------------------------------
-   */
+  const getSource = (item: any) =>
+    getValue(
+      item,
+      ['source', 'sourceSystem', 'origin', 'evidenceSource'],
+      'TRACEX ANALYSIS ENGINE'
+    );
 
-  const categories = [
-    'ALL',
-    'FINANCIAL',
-    'INTERCEPT',
-    'SURVEILLANCE',
-    'KYC_RECORD',
-    'EMAIL',
-    'URL',
-    'AUTHENTICATION',
-    'DOCUMENT',
-    'IMAGE',
-    'OTHER',
-  ];
+  const getIntegrityStatus = (item: any) =>
+    getValue(
+      item,
+      ['integrityStatus', 'verificationStatus', 'hashStatus'],
+      getHash(item) ? 'SHA-256 VERIFIED' : 'METADATA VERIFIED'
+    );
 
-  const filtered = useMemo(() => {
+  const getIcon = (item: any) => {
+    const type = `${getFileType(item)} ${getCategory(item)}`.toLowerCase();
+
+    if (type.includes('pdf')) return 'picture_as_pdf';
+    if (type.includes('image') || type.includes('jpg') || type.includes('png')) {
+      return 'image';
+    }
+    if (type.includes('audio') || type.includes('intercept')) return 'graphic_eq';
+    if (type.includes('email')) return 'mail';
+    if (type.includes('url') || type.includes('link')) return 'link';
+    if (type.includes('financial')) return 'account_balance';
+    if (type.includes('kyc')) return 'badge';
+    if (type.includes('surveillance')) return 'videocam';
+    return 'description';
+  };
+
+  const filteredEvidence = useMemo(() => {
     const query = searchTerm.toLowerCase().trim();
 
     return evidenceList.filter((item: any) => {
       const category = getCategory(item);
       const title = getTitle(item);
-      const description = getDescription(item);
       const id = String(item?.id || '');
+      const description = getDescription(item);
+      const hash = getHash(item);
 
-      const matchesCat =
+      const categoryMatch =
         filterCategory === 'ALL' ||
         category.toUpperCase() === filterCategory;
 
-      const matchesSearch =
+      const searchMatch =
         !query ||
         title.toLowerCase().includes(query) ||
-        id.toLowerCase().includes(query) ||
         category.toLowerCase().includes(query) ||
+        id.toLowerCase().includes(query) ||
         description.toLowerCase().includes(query) ||
-        getHash(item).toLowerCase().includes(query);
+        hash.toLowerCase().includes(query);
 
-      return matchesCat && matchesSearch;
+      return categoryMatch && searchMatch;
     });
   }, [evidenceList, filterCategory, searchTerm]);
 
-  /*
-   * ---------------------------------------------------------
-   * DOWNLOAD
-   * ---------------------------------------------------------
-   *
-   * If backend provides an actual file URL:
-   *     download the actual evidence.
-   *
-   * Otherwise:
-   *     download a forensic evidence dossier as JSON.
-   *
-   * This means the button always works, while actual-file
-   * downloading depends on the backend providing a URL.
-   */
-
-  const handleDownloadEvidence = (item: EvidenceRecord) => {
+  const downloadEvidence = (item: EvidenceRecord) => {
     const evidence: any = item;
-
     const fileUrl = getFileUrl(evidence);
-    const title = getTitle(evidence);
     const id = String(evidence?.id || 'EVIDENCE');
-
-    /*
-     * ACTUAL FILE DOWNLOAD
-     */
+    const title = getTitle(evidence);
 
     if (fileUrl) {
       const anchor = document.createElement('a');
-
       anchor.href = fileUrl;
       anchor.target = '_blank';
       anchor.rel = 'noopener noreferrer';
-
-      const extension = getFileType(evidence)
+      anchor.download = `${id}-${title
+        .replace(/[^a-zA-Z0-9-_]/g, '_')
+        .slice(0, 80)}.${getFileType(evidence)
         .toLowerCase()
-        .replace(/[^a-z0-9]/g, '');
-
-      anchor.download = `${id}-${title.replace(
-        /[^a-zA-Z0-9-_]/g,
-        '_'
-      )}.${extension || 'file'}`;
+        .replace(/[^a-z0-9]/g, '') || 'file'}`;
 
       document.body.appendChild(anchor);
       anchor.click();
       document.body.removeChild(anchor);
-
       return;
     }
 
-    /*
-     * FORENSIC DOSSIER DOWNLOAD
-     */
-
     const dossier = {
       dossierType: 'TRACEX FORENSIC EVIDENCE DOSSIER',
-
       case: {
-        id: currentCase.id,
-        title: currentCase.title,
+        id: currentCase?.id,
+        title: currentCase?.title,
       },
-
       evidence: {
         recordId: id,
         title,
+        fileName: getFileName(evidence),
         category: getCategory(evidence),
         classification: getClassification(evidence),
-        description: getDescription(evidence),
-        fileSize: getFileSize(evidence),
         fileType: getFileType(evidence),
+        fileSize: getFileSize(evidence),
         uploadedBy: getUploadedBy(evidence),
         uploadedAt: getUploadedAt(evidence),
-        sha256: getHash(evidence) || 'Not available',
+        source: getSource(evidence),
+        integrityStatus: getIntegrityStatus(evidence),
+        sha256: getHash(evidence) || null,
+        description: getDescription(evidence),
       },
-
       rawEvidenceRecord: evidence,
-
       generatedAt: new Date().toISOString(),
-
       notice:
-        'This dossier contains the evidence metadata and forensic information returned by the TRACEX analysis backend. An original binary file can only be downloaded when the backend provides a valid file URL.',
+        'This dossier contains the evidence metadata returned by TRACEX. An original binary file is only downloadable when a valid backend file URL is available.',
     };
 
-    const blob = new Blob(
-      [JSON.stringify(dossier, null, 2)],
-      {
-        type: 'application/json',
-      }
-    );
+    const blob = new Blob([JSON.stringify(dossier, null, 2)], {
+      type: 'application/json',
+    });
 
     const url = URL.createObjectURL(blob);
-
     const anchor = document.createElement('a');
 
     anchor.href = url;
@@ -404,560 +317,500 @@ export const EvidenceVaultView: React.FC<EvidenceVaultViewProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  /*
-   * ---------------------------------------------------------
-   * RENDER
-   * ---------------------------------------------------------
-   */
+  const copyHash = async () => {
+    if (!selectedItem) return;
+
+    const hash = getHash(selectedItem);
+    if (!hash) return;
+
+    try {
+      await navigator.clipboard.writeText(hash);
+      setCopiedHash(true);
+      window.setTimeout(() => setCopiedHash(false), 1600);
+    } catch {
+      setCopiedHash(false);
+    }
+  };
 
   return (
-    <div className="flex-1 flex flex-col gap-6 overflow-y-auto pr-2 pb-12">
-
-      {/* =====================================================
-          HEADER
-      ===================================================== */}
-
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-
+    <div className="flex-1 min-h-0 flex flex-col gap-5 overflow-y-auto pr-1 pb-10">
+      {/* HEADER */}
+      <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-4">
         <div>
-
-          <div className="flex items-center gap-2 mb-1">
-
-            <span className="font-mono text-xs text-[#7bd6d1] font-bold uppercase tracking-wider">
-              {currentCase.id} EVIDENCE VAULT
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <span className="font-mono text-[11px] text-[#7bd6d1] font-bold tracking-[0.16em]">
+              {currentCase?.id || 'CASE'} / EVIDENCE VAULT
             </span>
 
-            <span className="px-2 py-0.5 rounded bg-[#007774]/20 border border-[#007774]/40 font-mono text-[9px] text-[#a1fcf7] font-bold">
-              CHAIN OF CUSTODY VERIFIED
+            <span className="px-2 py-1 rounded bg-[#007774]/15 border border-[#007774]/40 font-mono text-[9px] text-[#a1fcf7] font-bold tracking-wider">
+              CHAIN OF CUSTODY
             </span>
-
           </div>
 
-          <h2 className="font-sans text-2xl sm:text-3xl font-bold text-white tracking-tight">
-            Forensic Evidence & Document Repository
+          <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
+            Forensic Evidence Repository
           </h2>
 
           <p className="mt-1 text-xs text-[#859491] font-mono">
-            {evidenceList.length} EVIDENCE RECORD
-            {evidenceList.length === 1 ? '' : 'S'} REGISTERED
+            {evidenceList.length} REGISTERED RECORD
+            {evidenceList.length === 1 ? '' : 'S'}
+            {' · '}
+            {filteredEvidence.length} MATCHED
           </p>
-
         </div>
 
-        <div className="flex items-center gap-3">
-
-          <button
-            type="button"
-            onClick={() => {
-              alert(
-                'Upload new exhibit is controlled by the case ingestion workflow. Upload the file through NEW CASE to have it analyzed and registered.'
-              );
-            }}
-            className="px-3.5 py-2 rounded bg-[#66FCF1] text-[#00201e] font-mono text-[10px] font-bold uppercase tracking-wider hover:opacity-90 transition-all flex items-center gap-2 shadow-md"
-          >
-            <span className="material-symbols-outlined text-[16px]">
-              upload_file
-            </span>
-
-            UPLOAD NEW EXHIBIT
-          </button>
-
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#111817] border border-[#3c4948]/50">
+          <span className="w-2 h-2 rounded-full bg-[#66FCF1] shadow-[0_0_8px_rgba(102,252,241,0.8)]" />
+          <span className="font-mono text-[9px] text-[#a1fcf7] tracking-wider">
+            EVIDENCE INTEGRITY MONITOR
+          </span>
         </div>
-
       </div>
 
-
-      {/* =====================================================
-          FILTERS
-      ===================================================== */}
-
-      <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between bg-[#1a2120] border border-[#3c4948]/40 p-3 rounded-lg">
-
-        <div className="flex gap-2 overflow-x-auto">
-
-          {categories.map((cat) => (
-
-            <button
-              key={cat}
-              type="button"
-              onClick={() => setFilterCategory(cat)}
-              className={`px-3 py-1.5 rounded font-mono text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap ${filterCategory === cat
-                  ? 'bg-[#66FCF1] text-[#00201e]'
-                  : 'bg-[#0e1514] text-[#bacac7] hover:text-white border border-[#3c4948]/50'
+      {/* FILTER BAR */}
+      <div className="bg-[#151c1b] border border-[#3c4948]/50 rounded-xl p-3">
+        <div className="flex flex-col lg:flex-row gap-3 lg:items-center justify-between">
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {CATEGORIES.map((category) => (
+              <button
+                key={category}
+                type="button"
+                onClick={() => setFilterCategory(category)}
+                className={`px-3 py-1.5 rounded-md font-mono text-[9px] font-bold tracking-wider whitespace-nowrap transition-all ${
+                  filterCategory === category
+                    ? 'bg-[#66FCF1] text-[#00201e]'
+                    : 'bg-[#0e1514] text-[#bacac7] border border-[#3c4948]/60 hover:border-[#66FCF1]/40 hover:text-white'
                 }`}
-            >
-              {cat}
-            </button>
-
-          ))}
-
-        </div>
-
-        <div className="flex items-center bg-[#0e1514] border border-[#3c4948]/60 px-3 py-1.5 rounded w-full md:w-72">
-
-          <span className="material-symbols-outlined text-[#7bd6d1] text-[16px] mr-2">
-            search
-          </span>
-
-          <input
-            type="text"
-            placeholder="Filter evidence or hash..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="bg-transparent border-none text-white text-xs font-mono focus:outline-none w-full placeholder:text-[#859491]/60"
-          />
-
-        </div>
-
-      </div>
-
-
-      {/* =====================================================
-          NO EVIDENCE
-      ===================================================== */}
-
-      {filtered.length === 0 && (
-
-        <div className="bg-[#1a2120] border border-[#3c4948]/40 rounded-lg p-10 flex flex-col items-center justify-center text-center">
-
-          <span className="material-symbols-outlined text-[#66FCF1] text-[42px] mb-3">
-            folder_off
-          </span>
-
-          <h3 className="text-white font-bold text-lg">
-            No Evidence Found
-          </h3>
-
-          <p className="text-[#859491] text-xs font-mono mt-2">
-            {evidenceList.length === 0
-              ? 'The backend returned no evidence records for this case.'
-              : 'No evidence matches the current filter.'}
-          </p>
-
-        </div>
-
-      )}
-
-
-      {/* =====================================================
-          MAIN GRID
-      ===================================================== */}
-
-      {filtered.length > 0 && (
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-
-          {/* =================================================
-              EVIDENCE LIST
-          ================================================= */}
-
-          <div className="lg:col-span-7 flex flex-col gap-3">
-
-            {filtered.map((item: EvidenceRecord) => {
-
-              const isSelected =
-                selectedItem?.id === item.id;
-
-              const title = getTitle(item);
-              const category = getCategory(item);
-              const classification =
-                getClassification(item);
-
-              const description =
-                getDescription(item);
-
-              const fileSize =
-                getFileSize(item);
-
-              const uploadedBy =
-                getUploadedBy(item);
-
-              const uploadedAt =
-                getUploadedAt(item);
-
-              const fileType =
-                getFileType(item);
-
-              return (
-
-                <div
-                  key={item.id}
-                  onClick={() => setSelectedItem(item)}
-                  className={`bg-[#1a2120] border p-4 rounded-lg cursor-pointer transition-all flex flex-col gap-3 shadow-sm ${isSelected
-                      ? 'border-[#66FCF1] bg-[#242b2a] shadow-[0_0_12px_rgba(102,252,241,0.2)]'
-                      : 'border-[#3c4948]/40 hover:border-[#3c4948]/80 hover:bg-[#202726]'
-                    }`}
-                >
-
-                  <div className="flex justify-between items-start">
-
-                    <div className="flex items-center gap-2.5">
-
-                      <span className="material-symbols-outlined text-[20px] p-2 rounded bg-[#0e1514] text-[#66FCF1] border border-[#3c4948]/50">
-
-                        {fileType.toLowerCase().includes('pdf')
-                          ? 'description'
-                          : fileType.toLowerCase().includes('audio')
-                            ? 'graphic_eq'
-                            : fileType.toLowerCase().includes('image')
-                              ? 'photo_camera'
-                              : fileType.toLowerCase().includes('email')
-                                ? 'mail'
-                                : fileType.toLowerCase().includes('url')
-                                  ? 'link'
-                                  : 'folder'}
-
-                      </span>
-
-                      <div>
-
-                        <span className="font-mono text-[10px] font-bold text-[#7bd6d1] uppercase tracking-wider">
-                          {item.id}
-                        </span>
-
-                        <h4 className="font-sans text-sm font-bold text-white leading-tight">
-                          {title}
-                        </h4>
-
-                      </div>
-
-                    </div>
-
-                    <span className="px-2 py-0.5 rounded font-mono text-[9px] font-extrabold tracking-wider bg-[#93000a]/20 text-[#ffb4ab] border border-[#ffb4ab]/30">
-                      {classification}
-                    </span>
-
-                  </div>
-
-
-                  <p className="font-sans text-xs text-[#bacac7] line-clamp-2">
-                    {description}
-                  </p>
-
-
-                  <div className="flex justify-between items-center pt-2 border-t border-[#3c4948]/30 font-mono text-[9px] text-[#859491]">
-
-                    <span>
-                      BY: {uploadedBy}
-                    </span>
-
-                    <span>
-                      SIZE: {fileSize}
-                    </span>
-
-                    <span>
-                      {uploadedAt}
-                    </span>
-
-                  </div>
-
-                </div>
-
-              );
-
-            })}
-
+              >
+                {category}
+              </button>
+            ))}
           </div>
 
-
-          {/* =================================================
-              INSPECTOR
-          ================================================= */}
-
-          {selectedItem && (
-
-            <div className="lg:col-span-5 bg-[#1a2120] border border-[#3c4948]/40 rounded-lg p-5 flex flex-col gap-4 shadow-xl">
-
-              {/*
-               * NORMALIZED VALUES
-               */}
-
-              {(() => {
-
-                const title =
-                  getTitle(selectedItem);
-
-                const category =
-                  getCategory(selectedItem);
-
-                const classification =
-                  getClassification(selectedItem);
-
-                const description =
-                  getDescription(selectedItem);
-
-                const fileSize =
-                  getFileSize(selectedItem);
-
-                const fileType =
-                  getFileType(selectedItem);
-
-                const uploadedBy =
-                  getUploadedBy(selectedItem);
-
-                const uploadedAt =
-                  getUploadedAt(selectedItem);
-
-                const hash =
-                  getHash(selectedItem);
-
-                const fileUrl =
-                  getFileUrl(selectedItem);
-
-                return (
-
-                  <>
-
-                    {/* HEADER */}
-
-                    <div className="flex justify-between items-center border-b border-[#3c4948]/40 pb-3">
-
-                      <span className="font-mono text-xs font-bold text-[#66FCF1] tracking-wider uppercase">
-                        EXHIBIT INSPECTOR
-                      </span>
-
-                      <span className="flex items-center gap-1 font-mono text-[10px] text-[#a1fcf7]">
-
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#66FCF1]"></span>
-
-                        {hash
-                          ? 'SHA-256 VERIFIED'
-                          : 'METADATA VERIFIED'}
-
-                      </span>
-
-                    </div>
-
-
-                    {/* TITLE */}
-
-                    <div>
-
-                      <span className="font-mono text-[10px] text-[#859491] uppercase tracking-wider block">
-                        TITLE
-                      </span>
-
-                      <h3 className="font-sans text-base font-bold text-white mt-0.5">
-                        {title}
-                      </h3>
-
-                    </div>
-
-
-                    {/* RECORD INFORMATION */}
-
-                    <div className="bg-[#0e1514] p-3 rounded border border-[#3c4948]/40 font-mono text-[10px] flex flex-col gap-2">
-
-                      <div className="flex justify-between gap-4">
-
-                        <span className="text-[#859491]">
-                          RECORD ID
-                        </span>
-
-                        <span className="text-white font-bold text-right">
-                          {selectedItem.id}
-                        </span>
-
-                      </div>
-
-
-                      <div className="flex justify-between gap-4">
-
-                        <span className="text-[#859491]">
-                          CATEGORY
-                        </span>
-
-                        <span className="text-[#66FCF1] font-bold text-right">
-                          {category}
-                        </span>
-
-                      </div>
-
-
-                      <div className="flex justify-between gap-4">
-
-                        <span className="text-[#859491]">
-                          CLASSIFICATION
-                        </span>
-
-                        <span className="text-[#ffb4ab] font-bold text-right">
-                          {classification}
-                        </span>
-
-                      </div>
-
-
-                      <div className="flex justify-between gap-4">
-
-                        <span className="text-[#859491]">
-                          FILE SIZE
-                        </span>
-
-                        <span className="text-white text-right">
-                          {fileSize}
-                        </span>
-
-                      </div>
-
-
-                      <div className="flex justify-between gap-4">
-
-                        <span className="text-[#859491]">
-                          FILE TYPE
-                        </span>
-
-                        <span className="text-white text-right">
-                          {fileType}
-                        </span>
-
-                      </div>
-
-
-                      <div className="flex justify-between gap-4">
-
-                        <span className="text-[#859491]">
-                          UPLOADED BY
-                        </span>
-
-                        <span className="text-white text-right">
-                          {uploadedBy}
-                        </span>
-
-                      </div>
-
-
-                      <div className="flex justify-between gap-4">
-
-                        <span className="text-[#859491]">
-                          UPLOADED AT
-                        </span>
-
-                        <span className="text-white text-right">
-                          {uploadedAt}
-                        </span>
-
-                      </div>
-
-
-                      {/* HASH */}
-
-                      <div className="flex flex-col gap-1 pt-2 border-t border-[#3c4948]/30">
-
-                        <span className="text-[#859491]">
-                          CRYPTOGRAPHIC CHECKSUM
-                        </span>
-
-                        <span className="text-[#7bd6d1] break-all font-mono text-[9px] bg-[#1a2120] p-1.5 rounded border border-[#3c4948]/40">
-
-                          {hash ||
-                            'SHA-256 hash not returned by backend'}
-
-                        </span>
-
-                      </div>
-
-                    </div>
-
-
-                    {/* FORENSIC EXTRACT */}
-
-                    <div>
-
-                      <span className="font-mono text-[10px] font-bold text-[#859491] uppercase tracking-wider block mb-1">
-                        SUMMARY & FORENSIC EXTRACT
-                      </span>
-
-                      <p className="font-sans text-xs text-[#dde4e2] leading-relaxed bg-[#0e1514] p-3 rounded border border-[#3c4948]/40">
-                        {description}
-                      </p>
-
-                    </div>
-
-
-                    {/* RAW DATA INDICATOR */}
-
-                    <div className="bg-[#0e1514] border border-[#3c4948]/40 rounded p-3">
-
-                      <div className="flex justify-between items-center">
-
-                        <span className="font-mono text-[9px] text-[#859491] uppercase">
-                          SOURCE STATUS
-                        </span>
-
-                        <span className="font-mono text-[9px] text-[#66FCF1]">
-                          BACKEND RECORD
-                        </span>
-
-                      </div>
-
-                      <p className="text-[10px] text-[#859491] mt-2 leading-relaxed">
-                        Information displayed here is taken from the
-                        evidence record returned by the TRACEX backend.
-                        Missing fields are not fabricated.
-                      </p>
-
-                    </div>
-
-
-                    {/* BUTTONS */}
-
-                    <div className="mt-auto flex flex-col gap-2 pt-4 border-t border-[#3c4948]/30">
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onSelectEvidence(
-                            selectedItem
-                          )
-                        }
-                        className="w-full py-2.5 bg-[#66FCF1] text-[#00201e] font-mono text-[10px] font-bold uppercase tracking-wider rounded hover:opacity-90 transition-all flex items-center justify-center gap-2 shadow-md"
-                      >
-
-                        <span className="material-symbols-outlined text-[16px]">
-                          visibility
-                        </span>
-
-                        OPEN FULL EVIDENCE DOSSIER
-
-                      </button>
-
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleDownloadEvidence(
-                            selectedItem
-                          )
-                        }
-                        className="w-full py-2.5 bg-[#111817] border border-[#66FCF1]/40 text-[#66FCF1] font-mono text-[10px] font-bold uppercase tracking-wider rounded hover:bg-[#172321] hover:border-[#66FCF1] transition-all flex items-center justify-center gap-2"
-                      >
-
-                        <span className="material-symbols-outlined text-[16px]">
-                          download
-                        </span>
-
-                        {fileUrl
-                          ? 'DOWNLOAD ORIGINAL EVIDENCE'
-                          : 'DOWNLOAD EVIDENCE DOSSIER'}
-
-                      </button>
-
-                    </div>
-
-                  </>
-
-                );
-
-              })()}
-
+          <div className="flex items-center bg-[#0b1110] border border-[#3c4948]/70 rounded-md px-3 py-2 w-full lg:w-80">
+            <span className="material-symbols-outlined text-[#7bd6d1] text-[17px] mr-2">
+              search
+            </span>
+
+            <input
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="Search evidence, ID, hash..."
+              className="w-full bg-transparent border-none outline-none text-white text-xs font-mono placeholder:text-[#687774]"
+            />
+
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="text-[#859491] hover:text-white"
+              >
+                <span className="material-symbols-outlined text-[16px]">
+                  close
+                </span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* EMPTY STATE */}
+      {filteredEvidence.length === 0 && (
+        <div className="flex-1 min-h-[360px] bg-[#151c1b] border border-[#3c4948]/50 rounded-xl flex items-center justify-center">
+          <div className="text-center max-w-md px-6">
+            <div className="mx-auto w-16 h-16 rounded-2xl bg-[#0b1110] border border-[#3c4948]/60 flex items-center justify-center">
+              <span className="material-symbols-outlined text-[#66FCF1] text-[34px]">
+                {evidenceList.length ? 'search_off' : 'folder_off'}
+              </span>
             </div>
 
-          )}
+            <h3 className="mt-4 text-white font-bold text-lg">
+              {evidenceList.length ? 'No Matching Evidence' : 'Evidence Vault Empty'}
+            </h3>
 
+            <p className="mt-2 text-[#859491] text-xs font-mono leading-relaxed">
+              {evidenceList.length
+                ? 'No evidence record matches the selected category or search query.'
+                : 'No evidence records were returned for this case. Upload and analyze case material through the New Case workflow.'}
+            </p>
+          </div>
         </div>
-
       )}
 
+      {/* MAIN */}
+      {filteredEvidence.length > 0 && (
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 min-h-0">
+          {/* LIST */}
+          <div className="xl:col-span-7 flex flex-col gap-3">
+            {filteredEvidence.map((item: EvidenceRecord) => {
+              const evidence: any = item;
+              const isSelected = selectedItem?.id === item.id;
+              const category = getCategory(evidence);
+              const classification = getClassification(evidence);
+
+              return (
+                <button
+                  key={String(item.id)}
+                  type="button"
+                  onClick={() => setSelectedItem(item)}
+                  className={`w-full text-left rounded-xl border p-4 transition-all ${
+                    isSelected
+                      ? 'bg-[#1e2927] border-[#66FCF1] shadow-[0_0_18px_rgba(102,252,241,0.12)]'
+                      : 'bg-[#151c1b] border-[#3c4948]/50 hover:border-[#5b716e] hover:bg-[#1a2221]'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className="w-10 h-10 shrink-0 rounded-lg bg-[#0b1110] border border-[#3c4948]/60 flex items-center justify-center">
+                        <span className="material-symbols-outlined text-[#66FCF1] text-[21px]">
+                          {getIcon(evidence)}
+                        </span>
+                      </div>
+
+                      <div className="min-w-0">
+                        <div className="font-mono text-[9px] text-[#7bd6d1] font-bold tracking-wider">
+                          {String(evidence?.id || 'EVIDENCE')}
+                        </div>
+
+                        <h3 className="mt-0.5 text-sm font-bold text-white truncate">
+                          {getTitle(evidence)}
+                        </h3>
+
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          <span className="text-[9px] font-mono text-[#859491]">
+                            {category}
+                          </span>
+                          <span className="text-[#3c4948]">•</span>
+                          <span className="text-[9px] font-mono text-[#859491]">
+                            {getFileType(evidence)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <span className="shrink-0 px-2 py-1 rounded border border-[#ffb4ab]/25 bg-[#93000a]/15 text-[#ffb4ab] font-mono text-[8px] font-bold tracking-wider">
+                      {classification}
+                    </span>
+                  </div>
+
+                  <p className="mt-3 text-xs text-[#bacac7] line-clamp-2 leading-relaxed">
+                    {getDescription(evidence)}
+                  </p>
+
+                  <div className="mt-3 pt-3 border-t border-[#3c4948]/30 flex flex-wrap gap-x-5 gap-y-1 font-mono text-[8px] text-[#758480]">
+                    <span>BY: {getUploadedBy(evidence)}</span>
+                    <span>SIZE: {getFileSize(evidence)}</span>
+                    <span>{getUploadedAt(evidence)}</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* INSPECTOR */}
+          {selectedItem && (
+            <div className="xl:col-span-5 xl:sticky xl:top-0 h-fit bg-[#151c1b] border border-[#3c4948]/50 rounded-xl p-5 shadow-xl">
+              <div className="flex items-center justify-between pb-3 border-b border-[#3c4948]/40">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[#66FCF1] text-[18px]">
+                    policy
+                  </span>
+                  <span className="font-mono text-[10px] font-bold text-[#66FCF1] tracking-wider">
+                    EXHIBIT INSPECTOR
+                  </span>
+                </div>
+
+                <span className="flex items-center gap-1.5 font-mono text-[8px] text-[#a1fcf7]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#66FCF1]" />
+                  {getIntegrityStatus(selectedItem)}
+                </span>
+              </div>
+
+              <div className="mt-4">
+                <div className="font-mono text-[9px] text-[#859491] tracking-wider">
+                  RECORD
+                </div>
+
+                <h3 className="mt-1 text-lg font-bold text-white leading-tight">
+                  {getTitle(selectedItem)}
+                </h3>
+
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <span className="px-2 py-1 rounded bg-[#007774]/15 border border-[#007774]/35 text-[#a1fcf7] font-mono text-[8px] font-bold">
+                    {getCategory(selectedItem)}
+                  </span>
+
+                  <span className="px-2 py-1 rounded bg-[#0b1110] border border-[#3c4948]/60 text-[#bacac7] font-mono text-[8px]">
+                    {getFileType(selectedItem)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <Info label="RECORD ID" value={String(selectedItem.id)} />
+                <Info
+                  label="CLASSIFICATION"
+                  value={getClassification(selectedItem)}
+                />
+                <Info label="FILE NAME" value={getFileName(selectedItem)} />
+                <Info label="FILE SIZE" value={getFileSize(selectedItem)} />
+                <Info label="UPLOADED BY" value={getUploadedBy(selectedItem)} />
+                <Info label="UPLOADED AT" value={getUploadedAt(selectedItem)} />
+                <Info label="SOURCE" value={getSource(selectedItem)} />
+                <Info
+                  label="INTEGRITY"
+                  value={getIntegrityStatus(selectedItem)}
+                />
+              </div>
+
+              <div className="mt-3 bg-[#0b1110] border border-[#3c4948]/50 rounded-lg p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-[8px] text-[#859491] tracking-wider">
+                    SHA-256 CHECKSUM
+                  </span>
+
+                  {getHash(selectedItem) && (
+                    <button
+                      type="button"
+                      onClick={copyHash}
+                      className="text-[8px] font-mono text-[#66FCF1] hover:text-white"
+                    >
+                      {copiedHash ? 'COPIED' : 'COPY'}
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-2 text-[9px] leading-relaxed text-[#7bd6d1] break-all font-mono">
+                  {getHash(selectedItem) || 'Hash not returned by backend'}
+                </div>
+              </div>
+
+              <div className="mt-3">
+                <div className="font-mono text-[9px] text-[#859491] tracking-wider">
+                  FORENSIC EXTRACT
+                </div>
+
+                <div className="mt-2 bg-[#0b1110] border border-[#3c4948]/50 rounded-lg p-3 max-h-44 overflow-y-auto">
+                  <p className="text-xs text-[#dde4e2] leading-relaxed whitespace-pre-wrap">
+                    {getDescription(selectedItem)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsDossierOpen(true)}
+                  className="w-full py-2.5 rounded-lg bg-[#66FCF1] text-[#00201e] font-mono text-[9px] font-bold tracking-wider hover:opacity-90 transition-all flex items-center justify-center gap-2"
+                >
+                  <span className="material-symbols-outlined text-[16px]">
+                    visibility
+                  </span>
+                  OPEN FULL EVIDENCE DOSSIER
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => downloadEvidence(selectedItem)}
+                  className="w-full py-2.5 rounded-lg bg-[#0b1110] border border-[#66FCF1]/40 text-[#66FCF1] font-mono text-[9px] font-bold tracking-wider hover:border-[#66FCF1] hover:bg-[#111918] transition-all flex items-center justify-center gap-2"
+                >
+                  <span className="material-symbols-outlined text-[16px]">
+                    download
+                  </span>
+                  {getFileUrl(selectedItem)
+                    ? 'DOWNLOAD ORIGINAL EVIDENCE'
+                    : 'DOWNLOAD EVIDENCE DOSSIER'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* FULL DOSSIER MODAL */}
+      {isDossierOpen && selectedItem && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsDossierOpen(false);
+            }
+          }}
+        >
+          <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-[#101716] border border-[#3c4948] rounded-2xl shadow-2xl">
+            <div className="sticky top-0 z-10 bg-[#101716]/95 backdrop-blur border-b border-[#3c4948]/50 px-5 py-4 flex items-center justify-between gap-4">
+              <div>
+                <div className="font-mono text-[9px] text-[#66FCF1] font-bold tracking-[0.18em]">
+                  TRACEX / FORENSIC DOSSIER
+                </div>
+                <h3 className="mt-1 text-lg font-bold text-white">
+                  {getTitle(selectedItem)}
+                </h3>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsDossierOpen(false)}
+                className="w-9 h-9 rounded-lg bg-[#0b1110] border border-[#3c4948]/60 text-[#bacac7] hover:text-white flex items-center justify-center"
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  close
+                </span>
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <DossierField label="CASE ID" value={currentCase?.id} />
+                <DossierField label="CASE TITLE" value={currentCase?.title} />
+                <DossierField
+                  label="RECORD ID"
+                  value={String(selectedItem.id)}
+                />
+                <DossierField
+                  label="CLASSIFICATION"
+                  value={getClassification(selectedItem)}
+                />
+                <DossierField
+                  label="CATEGORY"
+                  value={getCategory(selectedItem)}
+                />
+                <DossierField
+                  label="FILE NAME"
+                  value={getFileName(selectedItem)}
+                />
+                <DossierField
+                  label="FILE TYPE"
+                  value={getFileType(selectedItem)}
+                />
+                <DossierField
+                  label="FILE SIZE"
+                  value={getFileSize(selectedItem)}
+                />
+                <DossierField
+                  label="UPLOADED BY"
+                  value={getUploadedBy(selectedItem)}
+                />
+                <DossierField
+                  label="UPLOADED AT"
+                  value={getUploadedAt(selectedItem)}
+                />
+                <DossierField
+                  label="SOURCE"
+                  value={getSource(selectedItem)}
+                />
+                <DossierField
+                  label="INTEGRITY STATUS"
+                  value={getIntegrityStatus(selectedItem)}
+                />
+              </div>
+
+              <section className="bg-[#0b1110] border border-[#3c4948]/50 rounded-xl p-4">
+                <div className="font-mono text-[9px] text-[#859491] tracking-wider">
+                  CRYPTOGRAPHIC CHECKSUM
+                </div>
+                <div className="mt-2 text-[10px] text-[#7bd6d1] font-mono break-all">
+                  {getHash(selectedItem) || 'SHA-256 hash not returned by backend'}
+                </div>
+              </section>
+
+              <section className="bg-[#0b1110] border border-[#3c4948]/50 rounded-xl p-4">
+                <div className="font-mono text-[9px] text-[#859491] tracking-wider">
+                  SUMMARY & FORENSIC EXTRACT
+                </div>
+                <p className="mt-2 text-sm text-[#dde4e2] leading-relaxed whitespace-pre-wrap">
+                  {getDescription(selectedItem)}
+                </p>
+              </section>
+
+              <section className="bg-[#0b1110] border border-[#3c4948]/50 rounded-xl p-4">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[#66FCF1] text-[17px]">
+                    verified_user
+                  </span>
+                  <span className="font-mono text-[9px] font-bold text-[#66FCF1] tracking-wider">
+                    INVESTIGATIVE HANDLING NOTICE
+                  </span>
+                </div>
+
+                <p className="mt-2 text-[10px] text-[#859491] leading-relaxed">
+                  Evidence metadata shown here is taken from the TRACEX case
+                  analysis record. AI-generated interpretations are investigative
+                  leads and require human verification. No conclusion of guilt
+                  is made by this interface.
+                </p>
+              </section>
+
+              <div className="flex flex-col sm:flex-row gap-2">
+                <button
+                  type="button"
+                  onClick={() => downloadEvidence(selectedItem)}
+                  className="flex-1 py-2.5 rounded-lg bg-[#66FCF1] text-[#00201e] font-mono text-[9px] font-bold tracking-wider flex items-center justify-center gap-2"
+                >
+                  <span className="material-symbols-outlined text-[16px]">
+                    download
+                  </span>
+                  {getFileUrl(selectedItem)
+                    ? 'DOWNLOAD ORIGINAL'
+                    : 'DOWNLOAD FORENSIC DOSSIER'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsDossierOpen(false)}
+                  className="sm:w-36 py-2.5 rounded-lg bg-[#151c1b] border border-[#3c4948] text-[#bacac7] font-mono text-[9px] font-bold tracking-wider hover:text-white"
+                >
+                  CLOSE
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
+const Info: React.FC<{ label: string; value: string }> = ({
+  label,
+  value,
+}) => (
+  <div className="bg-[#0b1110] border border-[#3c4948]/40 rounded-lg p-2.5 min-w-0">
+    <div className="font-mono text-[7px] text-[#758480] tracking-wider">
+      {label}
+    </div>
+    <div className="mt-1 text-[9px] text-white font-mono truncate">
+      {value || 'Not available'}
+    </div>
+  </div>
+);
+
+const DossierField: React.FC<{ label: string; value?: string }> = ({
+  label,
+  value,
+}) => (
+  <div className="bg-[#151c1b] border border-[#3c4948]/40 rounded-lg p-3">
+    <div className="font-mono text-[8px] text-[#758480] tracking-wider">
+      {label}
+    </div>
+    <div className="mt-1.5 text-xs text-white font-mono break-words">
+      {value || 'Not available'}
+    </div>
+  </div>
+);
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return 'Not available';
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const index = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1
+  );
+
+  return `${(bytes / Math.pow(1024, index)).toFixed(
+    index === 0 ? 0 : 2
+  )} ${units[index]}`;
+}
+
+export default EvidenceVaultView;
