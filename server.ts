@@ -29,105 +29,6 @@ function getGeminiClient(): GoogleGenAI | null {
 }
 
 /* =========================================================
-   GEMINI RESILIENCE
-========================================================= */
-
-function isTransientGeminiError(error: any) {
-  const text = [
-    error?.message,
-    error?.status,
-    error?.statusText,
-    error?.code,
-    error?.error?.message,
-    error?.error?.status,
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toUpperCase();
-
-  return (
-    text.includes('503') ||
-    text.includes('UNAVAILABLE') ||
-    text.includes('429') ||
-    text.includes('RESOURCE_EXHAUSTED') ||
-    text.includes('TOO MANY REQUESTS') ||
-    text.includes('500') ||
-    text.includes('502') ||
-    text.includes('504') ||
-    text.includes('BAD GATEWAY') ||
-    text.includes('GATEWAY TIMEOUT')
-  );
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function generateGeminiContent(
-  ai: GoogleGenAI,
-  contents: any,
-  systemInstruction: string,
-  temperature = 0.1,
-) {
-  // Keep the cheap/fast model first, but automatically move to stable
-  // Flash models when Google temporarily returns capacity/rate-limit errors.
-  const models = [
-    'gemini-3.5-flash-lite',
-    'gemini-3.5-flash',
-    'gemini-3.6-flash',
-  ];
-
-  let lastError: any = null;
-
-  for (const model of models) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        console.log(
-          `[Gemini] Trying ${model} (attempt ${attempt}/2)`,
-        );
-
-        const config: any = {
-          systemInstruction,
-        };
-
-        // Gemini 3.6+ no longer supports the legacy sampling
-        // temperature parameter, so only send it to the 3.5 models.
-        if (model === 'gemini-3.5-flash-lite' || model === 'gemini-3.5-flash') {
-          config.temperature = temperature;
-        }
-
-        const response = await ai.models.generateContent({
-          model,
-          contents,
-          config,
-        });
-
-        console.log(`[Gemini] Success with ${model}`);
-        return response;
-      } catch (error: any) {
-        lastError = error;
-        console.error(
-          `[Gemini] ${model} attempt ${attempt} failed:`,
-          error?.message || error,
-        );
-
-        if (!isTransientGeminiError(error)) {
-          throw error;
-        }
-
-        if (attempt < 2) {
-          await sleep(800 * attempt);
-        }
-      }
-    }
-
-    console.warn(`[Gemini] Falling back from ${model} to next model.`);
-  }
-
-  throw lastError || new Error('All Gemini models are temporarily unavailable.');
-}
-
-/* =========================================================
    MULTER
 ========================================================= */
 
@@ -302,6 +203,118 @@ async function extractFileContent(file: Express.Multer.File) {
     content: `Unsupported file type: ${ext}`,
   };
 }
+
+
+/* =========================================================
+   GEMINI RESILIENT CALLER
+   Retries temporary 429/503/capacity errors and falls back
+   across currently supported stable Flash models.
+========================================================= */
+
+const GEMINI_MODELS = [
+  'gemini-3.7-flash',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
+];
+
+function isRetryableGeminiError(error: any) {
+  const status = Number(
+    error?.status ??
+    error?.code ??
+    error?.response?.status ??
+    error?.error?.code ??
+    0
+  );
+
+  const message = String(
+    error?.message ??
+    error?.error?.message ??
+    error?.response?.data?.error?.message ??
+    error ??
+    ''
+  ).toLowerCase();
+
+  return (
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    message.includes('503') ||
+    message.includes('429') ||
+    message.includes('unavailable') ||
+    message.includes('high demand') ||
+    message.includes('overloaded') ||
+    message.includes('temporarily') ||
+    message.includes('rate limit') ||
+    message.includes('resource exhausted')
+  );
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function generateGeminiWithFallback(
+  ai: GoogleGenAI,
+  request: {
+    contents: any;
+    systemInstruction?: string;
+    temperature?: number;
+  }
+) {
+  let lastError: any = null;
+
+  for (const model of GEMINI_MODELS) {
+    const maxAttempts = 2;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        console.log(
+          `[Gemini] Trying ${model} (attempt ${attempt}/${maxAttempts})`
+        );
+
+        const response = await ai.models.generateContent({
+          model,
+          contents: request.contents,
+          config: {
+            ...(request.systemInstruction
+              ? { systemInstruction: request.systemInstruction }
+              : {}),
+            ...(request.temperature !== undefined
+              ? { temperature: request.temperature }
+              : {}),
+          },
+        });
+
+        console.log(`[Gemini] Success with ${model}`);
+        return response;
+      } catch (error: any) {
+        lastError = error;
+
+        console.error(
+          `[Gemini] ${model} attempt ${attempt} failed:`,
+          error?.message || error
+        );
+
+        if (!isRetryableGeminiError(error)) {
+          throw error;
+        }
+
+        if (attempt < maxAttempts) {
+          // Small exponential backoff: 1.5s, then 3s.
+          await sleep(1500 * attempt);
+        }
+      }
+    }
+
+    console.warn(`[Gemini] Moving to fallback model after ${model} failed.`);
+  }
+
+  throw lastError || new Error('All Gemini fallback models failed.');
+}
+
 
 /* =========================================================
    CASE ANALYSIS ENGINE
@@ -644,12 +657,11 @@ Return JSON only.
     ...imageParts,
   ];
 
-  const response = await generateGeminiContent(
-    ai,
+  const response = await generateGeminiWithFallback(ai, {
     contents,
     systemInstruction,
-    0.1,
-  );
+    temperature: 0.1,
+  });
 
   const rawText = response.text || '';
 
@@ -1060,10 +1072,13 @@ Return VALID JSON ONLY using:
 }
 `;
 
-        const response = await generateGeminiContent(
-          ai,
-          deepScanPrompt,
-          `You are a synthetic criminal-network investigation
+        const response =
+          await generateGeminiWithFallback(ai, {
+            contents:
+              deepScanPrompt,
+
+            systemInstruction: `
+You are a synthetic criminal-network investigation
 analysis engine.
 
 Your role is analytical organization of supplied
@@ -1079,8 +1094,8 @@ AI findings require human verification.
 
 Return JSON only.
               `,
-          0.1,
-        );
+            temperature: 0.1,
+          });
 
         const rawText =
           response.text || '';
@@ -1222,9 +1237,10 @@ Unknowns / Limitations
 Recommended Verification Steps
 `;
 
-        const response = await generateGeminiContent(
-          ai,
-          `ANALYST QUERY:
+        const response =
+          await generateGeminiWithFallback(ai, {
+            contents: `
+ANALYST QUERY:
 
 ${message}
 
@@ -1240,9 +1256,11 @@ SELECTED ALERT:
 
 ${alertId || 'NONE'}
             `,
-          systemPrompt,
-          0.2,
-        );
+
+            systemInstruction:
+              systemPrompt,
+            temperature: 0.2,
+          });
 
         res.json({
           reply:
