@@ -212,10 +212,12 @@ async function extractFileContent(file: Express.Multer.File) {
 ========================================================= */
 
 const GEMINI_MODELS = [
+  'gemini-3.8-flash',
   'gemini-3.7-flash',
   'gemini-3.6-flash',
   'gemini-3.5-flash',
   'gemini-3.5-flash-lite',
+  'gemini-2.5-flash',
 ];
 
 function isRetryableGeminiError(error: any) {
@@ -267,7 +269,7 @@ async function generateGeminiWithFallback(
   let lastError: any = null;
 
   for (const model of GEMINI_MODELS) {
-    const maxAttempts = 2;
+    const maxAttempts = 1;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
@@ -282,9 +284,12 @@ async function generateGeminiWithFallback(
             ...(request.systemInstruction
               ? { systemInstruction: request.systemInstruction }
               : {}),
-            ...(request.temperature !== undefined
-              ? { temperature: request.temperature }
-              : {}),
+            // Gemini 3.8 Flash does not accept legacy sampling parameters.
+            ...(model === 'gemini-3.8-flash'
+              ? {}
+              : request.temperature !== undefined
+                ? { temperature: request.temperature }
+                : {}),
           },
         });
 
@@ -303,8 +308,7 @@ async function generateGeminiWithFallback(
         }
 
         if (attempt < maxAttempts) {
-          // Small exponential backoff: 1.5s, then 3s.
-          await sleep(1500 * attempt);
+          await sleep(1000);
         }
       }
     }
@@ -351,11 +355,10 @@ async function analyzeCaseFiles(
       return `
 ===== SOURCE FILE: ${file.filename} =====
 
-${
-  file.type === 'spreadsheet'
-    ? JSON.stringify(file.content, null, 2)
-    : file.content
-}
+${file.type === 'spreadsheet'
+          ? JSON.stringify(file.content, null, 2)
+          : file.content
+        }
 `;
     })
     .join('\n\n');
@@ -750,7 +753,7 @@ async function startServer() {
         const caseInfo = {
           title: String(
             req.body.title ||
-              'Untitled Investigation',
+            'Untitled Investigation',
           ),
 
           summary: String(
@@ -767,7 +770,7 @@ async function startServer() {
 
           leadInvestigator: String(
             req.body.leadInvestigator ||
-              'Unassigned',
+            'Unassigned',
           ),
         };
 
@@ -1007,10 +1010,10 @@ ${caseId || 'UNKNOWN'}
 CURRENT INVESTIGATION DATA:
 
 ${JSON.stringify(
-  caseData,
-  null,
-  2,
-)}
+          caseData,
+          null,
+          2,
+        )}
 
 ========================================================
 
@@ -1197,24 +1200,24 @@ The dataset is synthetic and used for software demonstration.
 
 CASE CONTEXT:
 ${JSON.stringify(
-  context?.case ?? {},
-  null,
-  2,
-)}
+          context?.case ?? {},
+          null,
+          2,
+        )}
 
 SELECTED ALERT:
 ${JSON.stringify(
-  context?.selectedAlert ?? null,
-  null,
-  2,
-)}
+          context?.selectedAlert ?? null,
+          null,
+          2,
+        )}
 
 AVAILABLE ALERTS:
 ${JSON.stringify(
-  context?.availableAlerts ?? [],
-  null,
-  2,
-)}
+          context?.availableAlerts ?? [],
+          null,
+          2,
+        )}
 
 RULES:
 
@@ -1352,5 +1355,4 @@ ${alertId || 'NONE'}
     },
   );
 }
-
 startServer();
