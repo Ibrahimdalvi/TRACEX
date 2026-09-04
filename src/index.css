@@ -1,0 +1,193 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Consolas', 'Courier New', monospace;
+}
+
+@layer base {
+  :root {
+    --font-hanken: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Consolas', 'Courier New', monospace;
+    --color-surface: #0B0C10;
+    --color-surface-1: #0e1514;
+    --color-surface-2: #1a2120;
+    --color-surface-3: #242b2a;
+    --color-surface-4: #2f3635;
+    --color-border: rgba(60, 73, 72, 0.4);
+    --color-border-strong: rgba(60, 73, 72, 0.7);
+    --color-accent: #66FCF1;
+    --color-accent-dim: #45A29E;
+    --color-accent-muted: #7bd6d1;
+    --color-text-primary: #dde4e2;
+    --color-text-secondary: #bacac7;
+    --color-text-muted: #859491;
+    --color-critical: #ffb4ab;
+    --color-critical-bg: rgba(147, 0, 10, 0.2);
+    --color-warning: #F6B352;
+    --color-warning-muted: #dec74a;
+  }
+
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    font-family: var(--font-hanken);
+    background-color: #0B0C10;
+    color: #dde4e2;
+    line-height: 1.5;
+  }
+
+  /* Remove input autofill styling */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0px 1000px #0e1514 inset;
+    -webkit-text-fill-color: #dde4e2;
+    transition: background-color 5000s ease-in-out 0s;
+  }
+}
+
+/* ─── Font Utilities ─────────────────────────────────────────── */
+.font-sans,
+.font-hanken {
+  font-family: var(--font-hanken);
+}
+
+.font-mono,
+.font-code {
+  font-family: var(--font-mono);
+}
+
+/* ─── Material Symbols ───────────────────────────────────────── */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  vertical-align: middle;
+  user-select: none;
+}
+
+.material-symbols-outlined.fill-1 {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+/* ─── Custom Scrollbars ──────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(11, 12, 16, 0.4);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(69, 162, 158, 0.2);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(102, 252, 241, 0.4);
+}
+
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* ─── Animations ─────────────────────────────────────────────── */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.18s ease-out forwards;
+}
+
+@keyframes radar-pulse {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  50% { transform: scale(1.1); opacity: 0.3; }
+  100% { transform: scale(0.95); opacity: 0.8; }
+}
+
+.radar-pulse {
+  animation: radar-pulse 3s infinite ease-in-out;
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 8s linear infinite;
+}
+
+/* ─── Background Grid Patterns ───────────────────────────────── */
+.hud-grid {
+  background-image:
+    linear-gradient(rgba(69, 162, 158, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(69, 162, 158, 0.055) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.hud-grid-dense {
+  background-image:
+    linear-gradient(rgba(69, 162, 158, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(69, 162, 158, 0.04) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+/* ─── Interactive States ─────────────────────────────────────── */
+.interactive-row {
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.interactive-row:hover {
+  background-color: rgba(36, 43, 42, 0.6);
+}
+
+/* ─── Status Badge Utility ───────────────────────────────────── */
+.badge-critical {
+  background: rgba(147, 0, 10, 0.2);
+  color: #ffb4ab;
+  border: 1px solid rgba(255, 180, 171, 0.3);
+}
+.badge-warning {
+  background: rgba(115, 100, 0, 0.2);
+  color: #fce363;
+  border: 1px solid rgba(252, 227, 99, 0.3);
+}
+.badge-info {
+  background: rgba(0, 119, 116, 0.2);
+  color: #a1fcf7;
+  border: 1px solid rgba(161, 252, 247, 0.3);
+}
+
+/* ─── Glassmorphism Panel ────────────────────────────────────── */
+.glass-panel {
+  background: rgba(26, 33, 32, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(60, 73, 72, 0.4);
+}
+
+/* ─── Focus Visible ─────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid rgba(102, 252, 241, 0.5);
+  outline-offset: 2px;
+}
+button:focus:not(:focus-visible) {
+  outline: none;
+}
