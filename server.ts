@@ -29,6 +29,105 @@ function getGeminiClient(): GoogleGenAI | null {
 }
 
 /* =========================================================
+   GEMINI RESILIENCE
+========================================================= */
+
+function isTransientGeminiError(error: any) {
+  const text = [
+    error?.message,
+    error?.status,
+    error?.statusText,
+    error?.code,
+    error?.error?.message,
+    error?.error?.status,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toUpperCase();
+
+  return (
+    text.includes('503') ||
+    text.includes('UNAVAILABLE') ||
+    text.includes('429') ||
+    text.includes('RESOURCE_EXHAUSTED') ||
+    text.includes('TOO MANY REQUESTS') ||
+    text.includes('500') ||
+    text.includes('502') ||
+    text.includes('504') ||
+    text.includes('BAD GATEWAY') ||
+    text.includes('GATEWAY TIMEOUT')
+  );
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function generateGeminiContent(
+  ai: GoogleGenAI,
+  contents: any,
+  systemInstruction: string,
+  temperature = 0.1,
+) {
+  // Keep the cheap/fast model first, but automatically move to stable
+  // Flash models when Google temporarily returns capacity/rate-limit errors.
+  const models = [
+    'gemini-3.5-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-3.6-flash',
+  ];
+
+  let lastError: any = null;
+
+  for (const model of models) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        console.log(
+          `[Gemini] Trying ${model} (attempt ${attempt}/2)`,
+        );
+
+        const config: any = {
+          systemInstruction,
+        };
+
+        // Gemini 3.6+ no longer supports the legacy sampling
+        // temperature parameter, so only send it to the 3.5 models.
+        if (model === 'gemini-3.5-flash-lite' || model === 'gemini-3.5-flash') {
+          config.temperature = temperature;
+        }
+
+        const response = await ai.models.generateContent({
+          model,
+          contents,
+          config,
+        });
+
+        console.log(`[Gemini] Success with ${model}`);
+        return response;
+      } catch (error: any) {
+        lastError = error;
+        console.error(
+          `[Gemini] ${model} attempt ${attempt} failed:`,
+          error?.message || error,
+        );
+
+        if (!isTransientGeminiError(error)) {
+          throw error;
+        }
+
+        if (attempt < 2) {
+          await sleep(800 * attempt);
+        }
+      }
+    }
+
+    console.warn(`[Gemini] Falling back from ${model} to next model.`);
+  }
+
+  throw lastError || new Error('All Gemini models are temporarily unavailable.');
+}
+
+/* =========================================================
    MULTER
 ========================================================= */
 
@@ -545,14 +644,12 @@ Return JSON only.
     ...imageParts,
   ];
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.5-flash-lite',
+  const response = await generateGeminiContent(
+    ai,
     contents,
-    config: {
-      systemInstruction,
-      temperature: 0.1,
-    },
-  });
+    systemInstruction,
+    0.1,
+  );
 
   const rawText = response.text || '';
 
@@ -963,17 +1060,10 @@ Return VALID JSON ONLY using:
 }
 `;
 
-        const response =
-          await ai.models.generateContent({
-            model:
-              'gemini-3.5-flash-lite',
-
-            contents:
-              deepScanPrompt,
-
-            config: {
-              systemInstruction: `
-You are a synthetic criminal-network investigation
+        const response = await generateGeminiContent(
+          ai,
+          deepScanPrompt,
+          `You are a synthetic criminal-network investigation
 analysis engine.
 
 Your role is analytical organization of supplied
@@ -989,10 +1079,8 @@ AI findings require human verification.
 
 Return JSON only.
               `,
-
-              temperature: 0.1,
-            },
-          });
+          0.1,
+        );
 
         const rawText =
           response.text || '';
@@ -1134,13 +1222,9 @@ Unknowns / Limitations
 Recommended Verification Steps
 `;
 
-        const response =
-          await ai.models.generateContent({
-            model:
-              'gemini-3.5-flash-lite',
-
-            contents: `
-ANALYST QUERY:
+        const response = await generateGeminiContent(
+          ai,
+          `ANALYST QUERY:
 
 ${message}
 
@@ -1156,14 +1240,9 @@ SELECTED ALERT:
 
 ${alertId || 'NONE'}
             `,
-
-            config: {
-              systemInstruction:
-                systemPrompt,
-
-              temperature: 0.2,
-            },
-          });
+          systemPrompt,
+          0.2,
+        );
 
         res.json({
           reply:
