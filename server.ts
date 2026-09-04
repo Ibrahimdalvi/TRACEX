@@ -444,7 +444,6 @@ function localAnalysisFallback(
 // Production model currently listed by Groq.
 const GROQ_MODELS = [
   'openai/gpt-oss-120b',
-  'openai/gpt-oss-20b',
   'llama-3.3-70b-versatile',
 ];
 
@@ -486,9 +485,9 @@ async function callGroq(request: {
   const lastErrors: string[] = [];
 
   for (const model of GROQ_MODELS) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (let attempt = 1; attempt <= 1; attempt++) {
       try {
-        console.log(`[Groq] Trying ${model} (attempt ${attempt}/2)`);
+        console.log(`[Groq] Trying ${model}`);
 
         const body: any = {
           model,
@@ -507,7 +506,7 @@ async function callGroq(request: {
         }
 
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 120000);
+        const timeout = setTimeout(() => controller.abort(), 45000);
 
         let response: Response;
         try {
@@ -562,8 +561,8 @@ async function callGroq(request: {
           message,
         );
 
-        if (attempt < 2 && isRetryableRemoteError(status, message)) {
-          await sleep(1000);
+        if (attempt < 1 && isRetryableRemoteError(status, message)) {
+          await sleep(500);
           continue;
         }
 
@@ -623,7 +622,7 @@ async function callCerebras(request: {
       }
 
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 120000);
+      const timeout = setTimeout(() => controller.abort(), 45000);
 
       let response: Response;
       try {
@@ -696,68 +695,72 @@ async function generateAIResponse(request: {
   images?: Array<{ mimeType: string; base64: string }>;
   jsonMode?: boolean;
 }) {
-  // PRIMARY: GEMINI
-  const gemini = getGeminiClient();
-  if (gemini) {
+  // FAST PRIMARY: Groq for normal text/spreadsheet analysis.
+  if (getGroqKey() && (!request.images || request.images.length === 0)) {
     try {
-      console.log('[AI] Trying Gemini primary...');
-      const response = await generateGeminiWithFallback(gemini, {
-        contents: request.prompt,
-        systemInstruction: request.systemInstruction,
-        temperature: request.jsonMode ? 0.1 : 0.2,
-      });
-      console.log('[AI] Gemini succeeded.');
-      return { text: response.text || '', provider: 'GEMINI' };
+      console.log('[AI] Trying Groq primary...');
+      const text = await callGroq(request);
+      console.log('[AI] Groq succeeded.');
+      return { text, provider: 'GROQ' };
     } catch (error: any) {
-      console.warn(
-        '[AI] Gemini failed; trying Cerebras backup.',
-        error?.message || error,
-      );
+      console.warn('[AI] Groq failed; trying Cerebras backup.', error?.message || error);
     }
-  } else {
-    console.warn(
-      '[AI] GEMINI_API_KEY is not configured; trying Cerebras backup.',
-    );
   }
 
-  // BACKUP 1: CEREBRAS
+  // Gemini remains first for image-heavy requests because it supports
+  // the multimodal input already used by this backend.
+  if (request.images && request.images.length > 0) {
+    const gemini = getGeminiClient();
+    if (gemini) {
+      try {
+        console.log('[AI] Trying Gemini multimodal...');
+        const response = await generateGeminiWithFallback(gemini, {
+          contents: request.prompt,
+          systemInstruction: request.systemInstruction,
+          temperature: request.jsonMode ? 0.1 : 0.2,
+        });
+        return { text: response.text || '', provider: 'GEMINI' };
+      } catch (error: any) {
+        console.warn('[AI] Gemini multimodal failed; trying Cerebras.', error?.message || error);
+      }
+    }
+  }
+
   if (getCerebrasKey()) {
     try {
       console.log('[AI] Trying Cerebras backup...');
       const text = await callCerebras(request);
       return { text, provider: 'CEREBRAS' };
     } catch (error: any) {
-      console.warn(
-        '[AI] Cerebras failed; trying Groq backup.',
-        error?.message || error,
-      );
+      console.warn('[AI] Cerebras failed; trying Groq fallback.', error?.message || error);
     }
-  } else {
-    console.warn(
-      '[AI] CEREBRAS_API_KEY is not configured; trying Groq backup.',
-    );
   }
 
-  // BACKUP 2: GROQ
   if (getGroqKey()) {
     try {
-      console.log('[AI] Trying Groq backup...');
+      console.log('[AI] Trying Groq fallback...');
       const text = await callGroq(request);
       return { text, provider: 'GROQ' };
     } catch (error: any) {
-      console.warn(
-        '[AI] Groq failed; using local deterministic fallback.',
-        error?.message || error,
-      );
+      console.warn('[AI] Groq fallback failed.', error?.message || error);
     }
-  } else {
-    console.warn(
-      '[AI] GROQ_API_KEY is not configured; using local deterministic fallback.',
-    );
   }
 
-  // LAST RESORT is handled by analyzeCaseFiles(), where the extracted
-  // source material is available to the deterministic local engine.
+  const gemini = getGeminiClient();
+  if (gemini) {
+    try {
+      console.log('[AI] Trying Gemini final fallback...');
+      const response = await generateGeminiWithFallback(gemini, {
+        contents: request.prompt,
+        systemInstruction: request.systemInstruction,
+        temperature: request.jsonMode ? 0.1 : 0.2,
+      });
+      return { text: response.text || '', provider: 'GEMINI' };
+    } catch (error: any) {
+      console.warn('[AI] Gemini final fallback failed.', error?.message || error);
+    }
+  }
+
   throw new Error('All external AI providers are unavailable.');
 }
 
@@ -787,13 +790,22 @@ async function analyzeCaseFiles(
 
   const sourceText = textFiles
     .map((file) => {
+      const rawContent =
+        file.type === 'spreadsheet'
+          ? JSON.stringify(file.content)
+          : String(file.content || '');
+
+      // Keep requests responsive while preserving the beginning of each source.
+      const MAX_SOURCE_CHARS = 30000;
+      const content =
+        rawContent.length > MAX_SOURCE_CHARS
+          ? `${rawContent.slice(0, MAX_SOURCE_CHARS)}\n[Source truncated for response speed]`
+          : rawContent;
+
       return `
 ===== SOURCE FILE: ${file.filename} =====
 
-${file.type === 'spreadsheet'
-          ? JSON.stringify(file.content, null, 2)
-          : file.content
-        }
+${content}
 `;
     })
     .join('\n\n');
@@ -1254,18 +1266,15 @@ async function startServer() {
            EXTRACT ALL FILES
         ----------------------------------------------- */
 
-        const extractedFiles = [];
+        // Parse all uploaded files in parallel to reduce case creation time.
+        console.log('Reading uploaded files in parallel...');
 
-        for (const file of files) {
-          console.log(
-            `Reading: ${file.originalname}`,
-          );
-
-          const extracted =
-            await extractFileContent(file);
-
-          extractedFiles.push(extracted);
-        }
+        const extractedFiles = await Promise.all(
+          files.map(async (file) => {
+            console.log(`Reading: ${file.originalname}`);
+            return extractFileContent(file);
+          }),
+        );
 
         /* -----------------------------------------------
            GEMINI ANALYSIS
@@ -1617,99 +1626,132 @@ Return JSON only.
           context,
         } = req.body;
 
+        if (!message || !String(message).trim()) {
+          return res.status(400).json({
+            error: 'A Copilot message is required.',
+          });
+        }
+
+        if (!getGroqKey()) {
+          return res.status(503).json({
+            error: 'GROQ_API_KEY is not configured on the backend.',
+          });
+        }
+
+        // Copilot is intentionally Groq-first and case-aware.
         const systemPrompt = `
-You are an investigative intelligence copilot.
+You are TRACEX Copilot, an investigative intelligence assistant.
 
 The dataset is synthetic and used for software demonstration.
 
 CASE CONTEXT:
-${JSON.stringify(
-          context?.case ?? {},
-          null,
-          2,
-        )}
+${JSON.stringify(context?.case ?? {}, null, 2)}
+
+AVAILABLE ENTITIES:
+${JSON.stringify(context?.entities ?? [], null, 2)}
+
+AVAILABLE RELATIONSHIPS:
+${JSON.stringify(context?.relationships ?? [], null, 2)}
+
+AVAILABLE EVIDENCE:
+${JSON.stringify(context?.evidence ?? [], null, 2)}
+
+TIMELINE:
+${JSON.stringify(context?.timeline ?? [], null, 2)}
 
 SELECTED ALERT:
-${JSON.stringify(
-          context?.selectedAlert ?? null,
-          null,
-          2,
-        )}
+${JSON.stringify(context?.selectedAlert ?? null, null, 2)}
 
 AVAILABLE ALERTS:
-${JSON.stringify(
-          context?.availableAlerts ?? [],
-          null,
-          2,
-        )}
+${JSON.stringify(context?.availableAlerts ?? [], null, 2)}
 
 RULES:
+1. Use ONLY supplied context.
+2. Never invent evidence, entities, relationships, dates, locations or facts.
+3. Clearly separate evidence from inference.
+4. Never declare anyone guilty.
+5. Mention when information is missing or unverified.
+6. Give concise analyst-oriented responses.
+7. Reference supplied identifiers and filenames when useful.
+8. AI output requires human verification.
 
-1. Use only supplied context.
-2. Never invent evidence.
-3. Never invent entities or relationships.
-4. Clearly separate evidence from inference.
-5. Never declare anyone guilty.
-6. Mention limitations when information is missing.
-7. Give concise analyst-oriented responses.
-8. Reference supplied identifiers.
-9. AI output requires human verification.
-
-Return:
-
+Return a concise, useful response with:
 Assessment
-Evidence / Supporting Records
+Supporting Evidence
 Confidence
 Unknowns / Limitations
 Recommended Verification Steps
 `;
 
-        let aiResponse: any;
+        let text = '';
+
         try {
-          aiResponse = await generateAIResponse({
+          console.log(`[Copilot] Groq request for case ${contextCaseId || 'UNKNOWN'}`);
+
+          text = await callGroq({
             prompt: `
 ANALYST QUERY:
-
-${message}
+${String(message).trim()}
 
 CASE ID:
-
 ${contextCaseId || 'UNKNOWN'}
 
 SELECTED ENTITY:
-
 ${entityId || 'NONE'}
 
 SELECTED ALERT:
-
 ${alertId || 'NONE'}
-            `,
+`,
             systemInstruction: systemPrompt,
             jsonMode: false,
           });
+
+          return res.json({
+            reply: text,
+            citations: [],
+            confidence: 0.8,
+            source: 'GROQ_INTELLIGENCE_ENGINE',
+          });
         } catch (error: any) {
-          return res.json({ reply: 'The external AI service is temporarily unavailable. The supplied investigation context remains available for manual review. Verify evidence and relationships before drawing conclusions.', citations: [], confidence: 0.5, source: 'LOCAL_FALLBACK' });
+          console.error('[Copilot] Groq failed:', error?.message || error);
+
+          // Quick Cerebras fallback keeps Copilot usable if Groq is temporarily rate-limited.
+          if (getCerebrasKey()) {
+            try {
+              text = await callCerebras({
+                prompt: `
+ANALYST QUERY:
+${String(message).trim()}
+
+CASE ID:
+${contextCaseId || 'UNKNOWN'}
+`,
+                systemInstruction: systemPrompt,
+                jsonMode: false,
+              });
+
+              return res.json({
+                reply: text,
+                citations: [],
+                confidence: 0.75,
+                source: 'CEREBRAS_FALLBACK',
+              });
+            } catch (backupError: any) {
+              console.error('[Copilot] Cerebras fallback failed:', backupError?.message || backupError);
+            }
+          }
+
+          return res.status(503).json({
+            error: 'Copilot AI service is temporarily unavailable.',
+            details: error?.message || String(error),
+          });
         }
-
-        res.json({
-          reply: aiResponse.text || 'No analytical response was generated.',
-          citations: [],
-          confidence: 0.8,
-          source: `${aiResponse.provider}_INTELLIGENCE_ENGINE`,
-        });
       } catch (err: any) {
-        console.error(
-          'Copilot API error:',
-          err,
-        );
+        console.error('Copilot API error:', err);
 
-        res.status(500).json({
-          error:
-            'Failed to process copilot query',
-
-          details:
-            err?.message ||
-            String(err),
+        return res.status(500).json({
+          error: 'Failed to process copilot query',
+          details: err?.message || String(err),
         });
       }
     },
