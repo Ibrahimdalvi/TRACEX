@@ -36,6 +36,10 @@ import {
 } from './types';
 
 
+const API_BASE_URL =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ||
+  'https://tracex-pshh.onrender.com';
+
 /* =========================================================
    AUTHENTICATED CASE DATA
    Cases and analysis are persisted in Supabase.

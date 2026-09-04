@@ -1623,8 +1623,23 @@ Return JSON only.
           contextCaseId,
           entityId,
           alertId,
+          selectedAlertId,
           context,
+          selectedAlert,
+          availableAlerts,
         } = req.body;
+
+        // Support both the current frontend payload and the older payload shape.
+        const resolvedAlertId = alertId || selectedAlertId || '';
+        const resolvedContext = context || {
+          case: {},
+          entities: [],
+          relationships: [],
+          evidence: [],
+          timeline: [],
+          selectedAlert: selectedAlert || null,
+          availableAlerts: availableAlerts || [],
+        };
 
         if (!message || !String(message).trim()) {
           return res.status(400).json({
@@ -1645,25 +1660,25 @@ You are TRACEX Copilot, an investigative intelligence assistant.
 The dataset is synthetic and used for software demonstration.
 
 CASE CONTEXT:
-${JSON.stringify(context?.case ?? {}, null, 2)}
+${JSON.stringify(resolvedContext?.case ?? {}, null, 2)}
 
 AVAILABLE ENTITIES:
-${JSON.stringify(context?.entities ?? [], null, 2)}
+${JSON.stringify(resolvedContext?.entities ?? [], null, 2)}
 
 AVAILABLE RELATIONSHIPS:
-${JSON.stringify(context?.relationships ?? [], null, 2)}
+${JSON.stringify(resolvedContext?.relationships ?? [], null, 2)}
 
 AVAILABLE EVIDENCE:
-${JSON.stringify(context?.evidence ?? [], null, 2)}
+${JSON.stringify(resolvedContext?.evidence ?? [], null, 2)}
 
 TIMELINE:
-${JSON.stringify(context?.timeline ?? [], null, 2)}
+${JSON.stringify(resolvedContext?.timeline ?? [], null, 2)}
 
 SELECTED ALERT:
-${JSON.stringify(context?.selectedAlert ?? null, null, 2)}
+${JSON.stringify(resolvedContext?.selectedAlert ?? null, null, 2)}
 
 AVAILABLE ALERTS:
-${JSON.stringify(context?.availableAlerts ?? [], null, 2)}
+${JSON.stringify(resolvedContext?.availableAlerts ?? [], null, 2)}
 
 RULES:
 1. Use ONLY supplied context.
@@ -1700,7 +1715,7 @@ SELECTED ENTITY:
 ${entityId || 'NONE'}
 
 SELECTED ALERT:
-${alertId || 'NONE'}
+${resolvedAlertId || 'NONE'}
 `,
             systemInstruction: systemPrompt,
             jsonMode: false,
